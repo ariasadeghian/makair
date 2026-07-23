@@ -164,6 +164,51 @@ def delete_transaction(
     return tx
 
 
+def get_transaction(
+    session: Session, user_id: int, transaction_id: int
+) -> Transaction | None:
+    """یک تراکنش را (فقط اگر متعلق به همین کاربر باشد) برمی‌گرداند."""
+    tx = session.get(Transaction, transaction_id)
+    return tx if tx is not None and tx.user_id == user_id else None
+
+
+def update_transaction(
+    session: Session,
+    user_id: int,
+    transaction_id: int,
+    *,
+    amount: int | None = None,
+    category: str | None = None,
+    description: str | None = None,
+    kind: str | None = None,
+) -> Transaction | None:
+    """فیلدهای یک تراکنش را ویرایش می‌کند (فقط مقادیر داده‌شده)."""
+    tx = get_transaction(session, user_id, transaction_id)
+    if tx is None:
+        return None
+    if amount is not None:
+        tx.amount = int(amount)
+    if category is not None:
+        tx.category = category
+    if description is not None:
+        tx.description = description
+    if kind is not None:
+        tx.kind = kind
+    session.commit()
+    return tx
+
+
+def recent(session: Session, user_id: int, limit: int = 10) -> list[Transaction]:
+    """آخرین تراکنش‌های کاربر، جدیدترین‌ها اول."""
+    stmt = (
+        select(Transaction)
+        .where(Transaction.user_id == user_id)
+        .order_by(Transaction.occurred_at.desc(), Transaction.id.desc())
+        .limit(limit)
+    )
+    return list(session.execute(stmt).scalars().all())
+
+
 def search_transactions(
     session: Session, user_id: int, query: str, limit: int = 15
 ) -> list[Transaction]:

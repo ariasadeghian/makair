@@ -8,6 +8,7 @@ from telegram import (
     ReplyKeyboardMarkup,
 )
 
+from ..core import categories
 from ..core.money import format_amount
 from ..plans import PLAN_ORDER, PLANS
 from . import texts
@@ -67,6 +68,36 @@ def moadian_send(invoice_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(texts.BTN_MOADIAN_SEND, callback_data=f"moadian:{invoice_id}")]]
     )
+
+
+def transaction_actions(transaction_id: int) -> InlineKeyboardMarkup:
+    """دکمه‌های اصلاح/حذف یک تراکنش در فهرست."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✏️ مبلغ", callback_data=f"tx:eamt:{transaction_id}"),
+                InlineKeyboardButton("🏷 دسته", callback_data=f"tx:ecat:{transaction_id}"),
+                InlineKeyboardButton("🗑 حذف", callback_data=f"tx:del:{transaction_id}"),
+            ]
+        ]
+    )
+
+
+def category_picker(transaction_id: int, kind: str) -> InlineKeyboardMarkup:
+    """انتخابگر دسته برای ویرایش (دو ستون)."""
+    options = categories.category_options(kind)
+    rows: list = []
+    row: list = []
+    for index, label in enumerate(options):
+        row.append(
+            InlineKeyboardButton(label, callback_data=f"tx:setcat:{transaction_id}:{index}")
+        )
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
 
 
 def report_periods() -> InlineKeyboardMarkup:

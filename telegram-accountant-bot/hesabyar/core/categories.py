@@ -36,6 +36,19 @@ DEFAULT_EXPENSE = "متفرقه"
 DEFAULT_INCOME = "فروش کالا"
 
 
+def category_options(kind: str) -> list[str]:
+    """فهرست دسته‌های قابل‌انتخاب برای ویرایش (بر اساس نوع تراکنش)."""
+    if kind == Kind.INCOME:
+        labels = [label for label, _ in INCOME_CATEGORIES]
+        if "سایر درآمد" not in labels:
+            labels.append("سایر درآمد")
+        return labels
+    labels = [label for label, _ in EXPENSE_CATEGORIES]
+    if DEFAULT_EXPENSE not in labels:
+        labels.append(DEFAULT_EXPENSE)
+    return labels
+
+
 def detect_category(text: str, kind: str) -> str:
     """دسته‌ی مناسب را بر اساس متن و نوع تراکنش برمی‌گرداند."""
     haystack = (text or "").replace("‌", " ")

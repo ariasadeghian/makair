@@ -23,7 +23,7 @@ from telegram.ext import (
 )
 
 from .. import plans
-from ..core import jalali, money
+from ..core import categories, jalali, money
 from ..db.models import Direction, Kind, PaymentStatus
 from ..pdf.invoice_pdf import render_invoice_pdf
 from ..services import backup as backup_service
@@ -69,6 +69,7 @@ def _clear_flow(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("flow", None)
     context.user_data.pop("ledger", None)
     context.user_data.pop("invoice", None)
+    context.user_data.pop("edit_tx", None)
 
 
 # --- دستورها -----------------------------------------------------------------
@@ -135,6 +136,112 @@ async def on_undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         summary = _tx_summary(tx) if tx else None
     text = texts.UNDO_DONE.format(summary=summary) if summary else texts.UNDO_NONE
     await _safe_edit(query, text)
+
+
+def _tx_line(tx) -> str:
+    line = (
+        f"{_kind_icon(tx.kind)} {_kind_label(tx.kind)} — {money.format_amount(tx.amount)}\n"
+        f"دسته: {tx.category} • {jalali.format_date(tx.occurred_at)}"
+    )
+    if tx.description:
+        line += f"\n{tx.description}"
+    return line
+
+
+async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /list — تراکنش‌های اخیر با دکمه‌های اصلاح/حذف."""
+    uid = update.effective_user.id
+    with _session(context) as session:
+        tx_service.get_or_create_user(session, uid)
+        txs = tx_service.recent(session, uid, limit=7)
+    if not txs:
+        return await update.message.reply_text(
+            texts.LIST_EMPTY, reply_markup=keyboards.main_menu()
+        )
+    await update.message.reply_text(texts.LIST_HEADER)
+    for tx in txs:
+        await update.message.reply_text(
+            _tx_line(tx), reply_markup=keyboards.transaction_actions(tx.id)
+        )
+
+
+async def _handle_edit_amount(update, context, text: str) -> None:
+    amount = money.parse_amount(text)
+    if amount is None:
+        return await update.message.reply_text(texts.EDIT_ASK_AMOUNT)
+    tx_id = context.user_data.get("edit_tx")
+    uid = update.effective_user.id
+    updated = None
+    if tx_id is not None:
+        with _session(context) as session:
+            updated = tx_service.update_transaction(session, uid, tx_id, amount=amount)
+    _clear_flow(context)
+    if updated is None:
+        return await update.message.reply_text(
+            texts.GENERIC_ERROR, reply_markup=keyboards.main_menu()
+        )
+    await update.message.reply_text(
+        texts.EDIT_AMOUNT_DONE.format(amount=money.format_amount(amount)),
+        reply_markup=keyboards.main_menu(),
+    )
+
+
+async def on_tx_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های اصلاح مبلغ/دسته و حذف زیر هر تراکنش."""
+    query = update.callback_query
+    parts = query.data.split(":")  # tx:action:id[:idx]
+    action = parts[1] if len(parts) > 1 else ""
+    try:
+        tx_id = int(parts[2])
+    except (IndexError, ValueError):
+        return await query.answer()
+    uid = update.effective_user.id
+
+    if action == "eamt":
+        await query.answer()
+        context.user_data["flow"] = "edit_amount"
+        context.user_data["edit_tx"] = tx_id
+        return await query.message.reply_text(texts.EDIT_ASK_AMOUNT)
+
+    if action == "del":
+        await query.answer()
+        with _session(context) as session:
+            tx_service.delete_transaction(session, uid, tx_id)
+        return await _safe_edit(query, texts.TX_DELETED)
+
+    if action == "ecat":
+        with _session(context) as session:
+            tx = tx_service.get_transaction(session, uid, tx_id)
+        if tx is None:
+            return await query.answer(texts.GENERIC_ERROR, show_alert=True)
+        await query.answer()
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=keyboards.category_picker(tx_id, tx.kind)
+            )
+        except Exception:
+            pass
+        return
+
+    if action == "setcat":
+        try:
+            idx = int(parts[3])
+        except (IndexError, ValueError):
+            return await query.answer()
+        new_cat = None
+        with _session(context) as session:
+            tx = tx_service.get_transaction(session, uid, tx_id)
+            if tx is not None:
+                options = categories.category_options(tx.kind)
+                if 0 <= idx < len(options):
+                    tx_service.update_transaction(
+                        session, uid, tx_id, category=options[idx]
+                    )
+                    new_cat = options[idx]
+        await query.answer()
+        if new_cat is None:
+            return await _safe_edit(query, texts.GENERIC_ERROR)
+        return await _safe_edit(query, texts.EDIT_CAT_DONE.format(category=new_cat))
 
 
 async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -271,6 +378,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await _handle_invoice_flow(update, context, text, flow)
     if flow == "payment_reference":
         return await _handle_payment_flow(update, context, reference=text)
+    if flow == "edit_amount":
+        return await _handle_edit_amount(update, context, text)
 
     # دکمه‌های منوی اصلی
     if text == texts.BTN_HELP:
@@ -952,6 +1061,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("search", search_cmd))
     application.add_handler(CommandHandler("backup", backup_cmd))
     application.add_handler(CommandHandler("dashboard", dashboard_cmd))
+    application.add_handler(CommandHandler("list", list_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
@@ -959,6 +1069,9 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_payment_review, pattern=r"^pay:"))
     application.add_handler(CallbackQueryHandler(on_zarinpal_verify, pattern=r"^zpv:"))
     application.add_handler(CallbackQueryHandler(on_undo, pattern=r"^tx:undo:"))
+    application.add_handler(
+        CallbackQueryHandler(on_tx_action, pattern=r"^tx:(eamt|ecat|setcat|del):")
+    )
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
     application.add_handler(MessageHandler(filters.PHOTO, on_photo))
     application.add_handler(MessageHandler(filters.Document.ALL, on_document))
