@@ -1,0 +1,27 @@
+services:
+  hesabyar:
+    build: .
+    image: hesabyar:latest
+    container_name: hesabyar
+    restart: unless-stopped
+    env_file: .env
+    # دیتابیس و پشتیبان‌ها روی حجمِ ماندگار
+    environment:
+      - DATABASE_URL=sqlite:////app/data/hesabyar.db
+    volumes:
+      - ./data:/app/data
+
+# --- گزینه‌ی PostgreSQL (برای بار بالاتر) ---
+# ابتدا psycopg را به requirements اضافه کنید و DATABASE_URL را در .env بگذارید:
+#   DATABASE_URL=postgresql+psycopg://hesabyar:secret@db:5432/hesabyar
+# سپس این سرویس را از حالت کامنت خارج کنید:
+#
+#  db:
+#    image: postgres:16-alpine
+#    restart: unless-stopped
+#    environment:
+#      POSTGRES_USER: hesabyar
+#      POSTGRES_PASSWORD: secret
+#      POSTGRES_DB: hesabyar
+#    volumes:
+#      - ./pgdata:/var/lib/postgresql/data
