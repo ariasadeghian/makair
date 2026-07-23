@@ -103,7 +103,9 @@ def _para(text: str, style: ParagraphStyle) -> Paragraph:
     return Paragraph(shape_fa(text), style)
 
 
-def render_invoice_pdf(invoice: Any, business: Any, out_path: str) -> str:
+def render_invoice_pdf(
+    invoice: Any, business: Any, out_path: str, payment_note: str = ""
+) -> str:
     """یک فاکتور فروش A4 راست‌چین در مسیر ``out_path`` می‌سازد.
 
     :param invoice: شیء فاکتور (مدل :class:`Invoice` یا هم‌ریخت آن). باید
@@ -224,9 +226,27 @@ def render_invoice_pdf(invoice: Any, business: Any, out_path: str) -> str:
     story.append(table)
     story.append(Spacer(1, 6 * mm))
 
-    # --- جمع کل --------------------------------------------------------------
-    total = int(getattr(invoice, "total", 0))
+    # --- جمع‌بندی: اقلام، تخفیف، ارسال، جمع کل --------------------------------
+    subtotal = int(getattr(invoice, "subtotal", getattr(invoice, "total", 0)))
+    discount = int(getattr(invoice, "discount", 0) or 0)
+    shipping = int(getattr(invoice, "shipping", 0) or 0)
+    total = int(getattr(invoice, "total", subtotal))
+    if discount or shipping:
+        story.append(_para(f"جمع اقلام: {money.format_amount(subtotal)}", normal_style))
+        if discount:
+            story.append(
+                _para(f"تخفیف: −{money.format_amount(discount)}", normal_style)
+            )
+        if shipping:
+            story.append(
+                _para(f"هزینه ارسال: {money.format_amount(shipping)}", normal_style)
+            )
     story.append(_para(f"جمع کل: {money.format_amount(total)}", total_style))
+
+    # --- اطلاعات پرداخت (در صورت وجود) ---------------------------------------
+    if payment_note:
+        story.append(Spacer(1, 4 * mm))
+        story.append(_para(payment_note, normal_style))
 
     # --- یادداشت (در صورت وجود) ----------------------------------------------
     note = getattr(invoice, "note", "") or ""
@@ -245,4 +265,35 @@ def render_invoice_pdf(invoice: Any, business: Any, out_path: str) -> str:
         title="فاکتور فروش",
     )
     doc.build(story)
+    return out_path
+
+
+def render_invoice_image(
+    invoice: Any,
+    business: Any,
+    out_path: str,
+    payment_note: str = "",
+    dpi: int = 150,
+) -> str:
+    """فاکتور را به‌صورت تصویر PNG می‌سازد (برای فوروارد آسان در پیام‌رسان‌ها).
+
+    ابتدا PDF ساخته می‌شود، سپس صفحه‌ی اول با pymupdf به PNG تبدیل می‌شود.
+    """
+    import os
+    import tempfile
+
+    import fitz  # pymupdf
+
+    fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        render_invoice_pdf(invoice, business, tmp_pdf, payment_note)
+        with fitz.open(tmp_pdf) as doc:
+            doc[0].get_pixmap(dpi=dpi).save(out_path)
+    finally:
+        if os.path.exists(tmp_pdf):
+            try:
+                os.remove(tmp_pdf)
+            except OSError:
+                pass
     return out_path

@@ -134,6 +134,9 @@ class Invoice(Base):
     customer_address: Mapped[str] = mapped_column(String(400), default="")
     issue_date: Mapped[dt.date] = mapped_column(Date)
     note: Mapped[str] = mapped_column(String(400), default="")
+    #: تخفیف و هزینه‌ی ارسال (تومان)
+    discount: Mapped[int] = mapped_column(BigInteger, default=0)
+    shipping: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -146,9 +149,14 @@ class Invoice(Base):
     )
 
     @property
-    def total(self) -> int:
-        """جمع کل فاکتور به تومان."""
+    def subtotal(self) -> int:
+        """جمع اقلام (پیش از تخفیف و ارسال)."""
         return sum(item.line_total for item in self.items)
+
+    @property
+    def total(self) -> int:
+        """جمع کل فاکتور به تومان: اقلام − تخفیف + ارسال."""
+        return self.subtotal - int(self.discount or 0) + int(self.shipping or 0)
 
 
 class PaymentStatus:
@@ -220,3 +228,19 @@ class InvoiceItem(Base):
     @property
     def line_total(self) -> int:
         return int(self.quantity) * int(self.unit_price)
+
+
+class Product(Base):
+    """کالا/خدمتِ ذخیره‌شده برای ساخت سریع فاکتور."""
+
+    __tablename__ = "products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    unit_price: Mapped[int] = mapped_column(BigInteger)  # تومان
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

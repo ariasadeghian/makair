@@ -64,6 +64,8 @@ def create_invoice(
     customer_phone: str = "",
     customer_address: str = "",
     note: str = "",
+    discount: int = 0,
+    shipping: int = 0,
     base: dt.datetime | None = None,
 ) -> Invoice:
     """یک فاکتور تازه با اقلامش می‌سازد و ذخیره می‌کند.
@@ -91,6 +93,8 @@ def create_invoice(
         customer_address=customer_address,
         issue_date=issue_date,
         note=note,
+        discount=int(discount or 0),
+        shipping=int(shipping or 0),
     )
     for item in items:
         invoice.items.append(

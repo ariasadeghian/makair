@@ -25,7 +25,7 @@ from telegram.ext import (
 from .. import plans
 from ..core import categories, jalali, money
 from ..db.models import Direction, Kind, PaymentStatus
-from ..pdf.invoice_pdf import render_invoice_pdf
+from ..pdf.invoice_pdf import render_invoice_image, render_invoice_pdf
 from ..services import backup as backup_service
 from ..services import dashboard as dashboard_service
 from ..services import export as export_service
@@ -36,6 +36,7 @@ from ..services import invoices as invoice_service
 from ..services import ledger as ledger_service
 from ..services import moadian as moadian_service
 from ..services import ocr as ocr_service
+from ..services import products as products_service
 from ..services import reports as report_service
 from ..services import subscription as sub_service
 from ..services import transactions as tx_service
@@ -70,6 +71,7 @@ def _clear_flow(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("ledger", None)
     context.user_data.pop("invoice", None)
     context.user_data.pop("edit_tx", None)
+    context.user_data.pop("product_tmp", None)
 
 
 # --- دستورها -----------------------------------------------------------------
@@ -374,8 +376,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await _handle_onboarding(update, context, text)
     if flow in ("ledger_party", "ledger_amount", "ledger_due"):
         return await _handle_ledger_flow(update, context, text, flow)
-    if flow in ("invoice_customer", "invoice_items"):
+    if flow in ("invoice_customer", "invoice_items", "inv_discount", "inv_shipping"):
         return await _handle_invoice_flow(update, context, text, flow)
+    if flow in ("prod_name", "prod_price"):
+        return await _handle_product_flow(update, context, text, flow)
     if flow == "payment_reference":
         return await _handle_payment_flow(update, context, reference=text)
     if flow == "edit_amount":
@@ -394,7 +398,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     if text == texts.BTN_INVOICE:
         context.user_data["flow"] = "invoice_customer"
-        context.user_data["invoice"] = {"items": []}
+        context.user_data["invoice"] = {"items": [], "discount": 0, "shipping": 0}
         return await update.message.reply_text(texts.INVOICE_ASK_CUSTOMER)
     if text == texts.BTN_SUBSCRIPTION:
         return await _show_subscription(update, context)
@@ -546,44 +550,198 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
 # --- فاکتور -------------------------------------------------------------------
 
 
+_FILLER = {"تا", "عدد", "عددی", "به", "قیمت", "تومان", "تومن"}
+
+
+def _leading_qty(s: str) -> int | None:
+    """نخستین عدد صحیح کوچک (۱ تا ۹۹۹) در متن را به‌عنوان تعداد برمی‌گرداند."""
+    for tok in money.to_english_digits(s).replace("٬", "").replace(",", "").split():
+        if re.fullmatch(r"\d{1,3}", tok):
+            return int(tok)
+    return None
+
+
+def _parse_item(text: str, products: dict) -> dict | None:
+    """یک قلم فاکتور را از متن می‌سازد.
+
+    قالب‌های پذیرفته: نام کالای ذخیره‌شده (با تعداد اختیاری)، «شرح × تعداد ×
+    قیمت»، یا آزاد «نام تعداد قیمت».
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+    for name, prod in products.items():  # ۱) تطبیق با کالای ذخیره‌شده
+        if name and name in t:
+            qty = _leading_qty(t.replace(name, " ")) or 1
+            return {"title": name, "quantity": qty, "unit_price": int(prod.unit_price)}
+    parts = [p.strip() for p in _ITEM_SPLIT.split(t) if p.strip()]  # ۲) قالب ×
+    if len(parts) >= 3:
+        qty = money.parse_int(parts[1])
+        price = money.parse_amount(parts[2])
+        if parts[0] and qty and qty > 0 and price:
+            return {"title": parts[0][:200], "quantity": qty, "unit_price": price}
+    # ۳) آزاد: «[نام] [تعداد؟] [قیمت]» — نام (واژه‌های بدون رقم) از جلو، سپس
+    #    اگر عددِ کوچکِ ابتدایی و عددِ دیگری بعدش بود، اولی تعداد و بقیه قیمت.
+    tokens = _ITEM_SPLIT.sub(" ", t).split()
+
+    def _has_digit(word: str) -> bool:
+        return bool(re.search(r"\d", money.to_english_digits(word)))
+
+    title_words, i = [], 0
+    while i < len(tokens) and not _has_digit(tokens[i]):
+        if tokens[i] not in _FILLER:
+            title_words.append(tokens[i])
+        i += 1
+    rest = tokens[i:]
+    if not rest:
+        return None
+    qty = 1
+    first = money.to_english_digits(rest[0]).replace("٬", "").replace(",", "")
+    if len(rest) >= 2 and re.fullmatch(r"\d{1,3}", first):
+        qty = int(first)
+        price = money.parse_amount(" ".join(rest[1:]))
+    else:
+        price = money.parse_amount(" ".join(rest))
+    title = " ".join(title_words).strip()
+    if price is None or qty <= 0 or not title:
+        return None
+    return {"title": title[:200], "quantity": qty, "unit_price": price}
+
+
+def _builder_text(inv: dict) -> str:
+    """متنِ خلاصه‌ی فاکتورِ در حال ساخت."""
+    lines = [f"🧾 <b>فاکتور برای {html.escape(inv.get('customer_name', 'مشتری'))}</b>", ""]
+    items = inv.get("items", [])
+    if not items:
+        lines.append("هنوز قلمی اضافه نشده.")
+    for it in items:
+        line_total = int(it["quantity"]) * int(it["unit_price"])
+        lines.append(
+            f"• {html.escape(it['title'])} × "
+            f"{money.to_persian_digits(str(it['quantity']))} = "
+            f"{money.format_amount(line_total, with_currency=False)}"
+        )
+    subtotal = sum(int(i["quantity"]) * int(i["unit_price"]) for i in items)
+    discount, shipping = int(inv.get("discount", 0)), int(inv.get("shipping", 0))
+    lines.append("")
+    lines.append(f"جمع اقلام: {money.format_amount(subtotal)}")
+    if discount:
+        lines.append(f"تخفیف: −{money.format_amount(discount)}")
+    if shipping:
+        lines.append(f"ارسال: {money.format_amount(shipping)}")
+    lines.append(f"<b>جمع کل: {money.format_amount(subtotal - discount + shipping)}</b>")
+    lines.append("")
+    lines.append("➕ روی کالاها بزنید یا دستی بنویسید: «نام تعداد قیمت»")
+    return "\n".join(lines)
+
+
+async def _refresh_builder(context: ContextTypes.DEFAULT_TYPE, uid: int) -> None:
+    inv = context.user_data.get("invoice")
+    if not inv or not inv.get("msg_id"):
+        return
+    with _session(context) as session:
+        products = products_service.list_products(session, uid)
+    try:
+        await context.bot.edit_message_text(
+            chat_id=inv["chat_id"], message_id=inv["msg_id"],
+            text=_builder_text(inv), parse_mode="HTML",
+            reply_markup=keyboards.invoice_builder(products, bool(inv.get("items"))),
+        )
+    except Exception:
+        pass
+
+
 async def _handle_invoice_flow(update, context, text: str, flow: str) -> None:
-    data = context.user_data.setdefault("invoice", {"items": []})
+    inv = context.user_data.setdefault(
+        "invoice", {"items": [], "discount": 0, "shipping": 0}
+    )
+    uid = update.effective_user.id
 
     if flow == "invoice_customer":
-        data["customer_name"] = text[:200]
+        inv["customer_name"] = text[:200]
         context.user_data["flow"] = "invoice_items"
-        return await update.message.reply_text(texts.INVOICE_ASK_ITEM)
+        with _session(context) as session:
+            products = products_service.list_products(session, uid)
+        sent = await update.message.reply_text(
+            _builder_text(inv), parse_mode="HTML",
+            reply_markup=keyboards.invoice_builder(products, False),
+        )
+        inv["msg_id"], inv["chat_id"] = sent.message_id, sent.chat_id
+        return
 
     if flow == "invoice_items":
-        if text in ("تمام", "تموم", "پایان", "اتمام"):
-            return await _finalize_invoice(update, context, data)
-        item = _parse_invoice_item(text)
+        with _session(context) as session:
+            products = {p.title: p for p in products_service.list_products(session, uid)}
+        item = _parse_item(text, products)
         if item is None:
             return await update.message.reply_text(texts.INVOICE_BAD_ITEM)
-        data.setdefault("items", []).append(item)
-        return await update.message.reply_text(texts.INVOICE_ITEM_ADDED)
+        inv.setdefault("items", []).append(item)
+        return await _refresh_builder(context, uid)
+
+    if flow == "inv_discount":
+        inv["discount"] = money.parse_amount(text) or 0
+        context.user_data["flow"] = "inv_shipping"
+        return await update.message.reply_text(texts.INVOICE_ASK_SHIPPING)
+
+    if flow == "inv_shipping":
+        inv["shipping"] = money.parse_amount(text) or 0
+        context.user_data["flow"] = "invoice_items"
+        await update.message.reply_text(texts.INVOICE_EXTRA_DONE)
+        return await _refresh_builder(context, uid)
 
 
-def _parse_invoice_item(text: str) -> dict | None:
-    parts = [p.strip() for p in _ITEM_SPLIT.split(text) if p.strip()]
-    if len(parts) < 3:
-        return None
-    title = parts[0]
-    quantity = money.parse_int(parts[1])
-    unit_price = money.parse_amount(parts[2])
-    if not title or quantity is None or quantity <= 0 or unit_price is None:
-        return None
-    return {"title": title[:200], "quantity": quantity, "unit_price": unit_price}
+async def on_invoice_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های ساختِ فاکتور: افزودن کالا، حذف آخرین، تخفیف/ارسال، صدور."""
+    query = update.callback_query
+    parts = query.data.split(":")  # inv:action[:id]
+    action = parts[1] if len(parts) > 1 else ""
+    uid = update.effective_user.id
+    inv = context.user_data.get("invoice")
+    if inv is None:
+        return await query.answer()
+
+    if action == "add":
+        try:
+            pid = int(parts[2])
+        except (IndexError, ValueError):
+            return await query.answer()
+        with _session(context) as session:
+            prod = products_service.get_product(session, uid, pid)
+        if prod is None:
+            return await query.answer()
+        inv.setdefault("items", []).append(
+            {"title": prod.title, "quantity": 1, "unit_price": int(prod.unit_price)}
+        )
+        await query.answer("افزوده شد ✅")
+        return await _refresh_builder(context, uid)
+
+    if action == "pop":
+        if inv.get("items"):
+            inv["items"].pop()
+        await query.answer("حذف شد")
+        return await _refresh_builder(context, uid)
+
+    if action == "extra":
+        context.user_data["flow"] = "inv_discount"
+        await query.answer()
+        return await query.message.reply_text(texts.INVOICE_ASK_DISCOUNT)
+
+    if action == "done":
+        await query.answer()
+        return await _finalize_invoice(update, context)
 
 
-async def _finalize_invoice(update, context, data: dict) -> None:
-    items = data.get("items", [])
+async def _finalize_invoice(update, context) -> None:
+    inv = context.user_data.get("invoice") or {}
+    items = inv.get("items", [])
+    chat_id = update.effective_chat.id
     if not items:
-        _clear_flow(context)
-        return await update.message.reply_text(
-            texts.INVOICE_NO_ITEMS, reply_markup=keyboards.main_menu()
+        return await context.bot.send_message(
+            chat_id, texts.INVOICE_NO_ITEMS, reply_markup=keyboards.main_menu()
         )
     uid = update.effective_user.id
+    settings = context.application.bot_data["settings"]
+
     with _session(context) as session:
         tx_service.get_or_create_user(session, uid)
         sub_service.get_or_create_subscription(session, uid)
@@ -591,42 +749,116 @@ async def _finalize_invoice(update, context, data: dict) -> None:
         session.commit()
     if not active:
         _clear_flow(context)
-        return await update.message.reply_text(
-            texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
+        return await context.bot.send_message(
+            chat_id, texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
         )
-    await update.message.reply_text(texts.INVOICE_GENERATING)
-    out_path = None
+
+    await context.bot.send_message(chat_id, texts.INVOICE_GENERATING)
+    payment_note = ""
+    if settings.card_number:
+        holder = f" به نام {settings.card_holder}" if settings.card_holder else ""
+        payment_note = f"پرداخت: کارت‌به‌کارت به {settings.card_number}{holder}"
+
+    img_path = pdf_path = None
     try:
         with _session(context) as session:
             user = tx_service.get_or_create_user(session, uid)
             invoice = invoice_service.create_invoice(
-                session,
-                uid,
-                customer_name=data.get("customer_name", "مشتری"),
-                items=items,
-                issue_date=jalali.now().date(),
+                session, uid, customer_name=inv.get("customer_name", "مشتری"),
+                items=items, issue_date=jalali.now().date(),
+                discount=int(inv.get("discount", 0)),
+                shipping=int(inv.get("shipping", 0)),
             )
             session.commit()
-            number = invoice.number
-            invoice_id = invoice.id
-            out_path = os.path.join(
-                tempfile.gettempdir(), f"invoice_{invoice.id}.pdf"
-            )
-            render_invoice_pdf(invoice, user, out_path)
-        with open(out_path, "rb") as fh:
-            await update.message.reply_document(
-                document=fh,
-                filename=f"factor-{number}.pdf",
+            number, invoice_id = invoice.number, invoice.id
+            img_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice_id}.png")
+            pdf_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice_id}.pdf")
+            render_invoice_image(invoice, user, img_path, payment_note)
+            render_invoice_pdf(invoice, user, pdf_path, payment_note)
+        with open(img_path, "rb") as fh:
+            await context.bot.send_photo(
+                chat_id, photo=fh,
                 caption=texts.INVOICE_DONE.format(number=number),
                 reply_markup=keyboards.moadian_send(invoice_id),
             )
+        with open(pdf_path, "rb") as fh:
+            await context.bot.send_document(
+                chat_id, document=fh, filename=f"factor-{number}.pdf",
+                reply_markup=keyboards.main_menu(),
+            )
     finally:
         _clear_flow(context)
-        if out_path and os.path.exists(out_path):
-            try:
-                os.remove(out_path)
-            except OSError:
-                pass
+        for p in (img_path, pdf_path):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+
+# --- کالاهای ذخیره‌شده --------------------------------------------------------
+
+
+async def products_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /products — مدیریت کالاهای ذخیره‌شده."""
+    uid = update.effective_user.id
+    with _session(context) as session:
+        tx_service.get_or_create_user(session, uid)
+        products = products_service.list_products(session, uid)
+    await update.message.reply_text(
+        texts.PRODUCTS_HEADER if products else texts.PRODUCTS_EMPTY,
+        reply_markup=keyboards.product_list(products),
+    )
+
+
+async def _handle_product_flow(update, context, text: str, flow: str) -> None:
+    if flow == "prod_name":
+        context.user_data["product_tmp"] = {"title": text[:200]}
+        context.user_data["flow"] = "prod_price"
+        return await update.message.reply_text(texts.PRODUCT_ASK_PRICE)
+    if flow == "prod_price":
+        price = money.parse_amount(text)
+        if price is None:
+            return await update.message.reply_text(texts.PRODUCT_ASK_PRICE)
+        title = (context.user_data.get("product_tmp") or {}).get("title", "کالا")
+        uid = update.effective_user.id
+        with _session(context) as session:
+            products_service.add_product(session, uid, title, price)
+            products = products_service.list_products(session, uid)
+        _clear_flow(context)
+        await update.message.reply_text(
+            texts.PRODUCT_SAVED.format(title=title, price=money.format_amount(price)),
+            reply_markup=keyboards.product_list(products),
+        )
+
+
+async def on_product_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های افزودن/حذف کالا."""
+    query = update.callback_query
+    parts = query.data.split(":")  # prod:add / prod:del:<id>
+    action = parts[1] if len(parts) > 1 else ""
+    uid = update.effective_user.id
+
+    if action == "add":
+        context.user_data["flow"] = "prod_name"
+        await query.answer()
+        return await query.message.reply_text(texts.PRODUCT_ASK_NAME)
+
+    if action == "del":
+        try:
+            pid = int(parts[2])
+        except (IndexError, ValueError):
+            return await query.answer()
+        with _session(context) as session:
+            products_service.delete_product(session, uid, pid)
+            products = products_service.list_products(session, uid)
+        await query.answer("حذف شد 🗑")
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=keyboards.product_list(products)
+            )
+        except Exception:
+            pass
 
 
 # --- اشتراک و پرداخت ----------------------------------------------------------
@@ -1062,6 +1294,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("backup", backup_cmd))
     application.add_handler(CommandHandler("dashboard", dashboard_cmd))
     application.add_handler(CommandHandler("list", list_cmd))
+    application.add_handler(CommandHandler("products", products_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
@@ -1073,6 +1306,8 @@ def register(application: Application) -> None:
         CallbackQueryHandler(on_tx_action, pattern=r"^tx:(eamt|ecat|setcat|del):")
     )
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
+    application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
+    application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(MessageHandler(filters.PHOTO, on_photo))
     application.add_handler(MessageHandler(filters.Document.ALL, on_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

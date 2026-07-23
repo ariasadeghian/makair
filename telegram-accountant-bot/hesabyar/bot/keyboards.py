@@ -83,6 +83,30 @@ def transaction_actions(transaction_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def invoice_builder(products, has_items: bool) -> InlineKeyboardMarkup:
+    """کیبورد ساختِ فاکتور: کالاهای ذخیره‌شده + کنترل‌ها."""
+    rows: list = []
+    for p in list(products)[:8]:
+        label = f"{p.title} — {format_amount(p.unit_price, with_currency=False)}"
+        rows.append([InlineKeyboardButton(f"➕ {label}", callback_data=f"inv:add:{p.id}")])
+    rows.append([InlineKeyboardButton("✅ صدور فاکتور", callback_data="inv:done")])
+    controls = [InlineKeyboardButton("🏷 تخفیف/ارسال", callback_data="inv:extra")]
+    if has_items:
+        controls.append(InlineKeyboardButton("↩️ حذف آخرین", callback_data="inv:pop"))
+    rows.append(controls)
+    return InlineKeyboardMarkup(rows)
+
+
+def product_list(products) -> InlineKeyboardMarkup:
+    """فهرست کالاها؛ هر کالا یک دکمه‌ی حذف، به‌علاوه‌ی افزودن."""
+    rows: list = []
+    for p in list(products)[:30]:
+        label = f"🗑 {p.title} — {format_amount(p.unit_price, with_currency=False)}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"prod:del:{p.id}")])
+    rows.append([InlineKeyboardButton("➕ افزودن کالا", callback_data="prod:add")])
+    return InlineKeyboardMarkup(rows)
+
+
 def category_picker(transaction_id: int, kind: str) -> InlineKeyboardMarkup:
     """انتخابگر دسته برای ویرایش (دو ستون)."""
     options = categories.category_options(kind)
