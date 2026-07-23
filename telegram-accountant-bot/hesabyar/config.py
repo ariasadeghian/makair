@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import os
 from dataclasses import dataclass, field
 
@@ -55,7 +56,9 @@ class Settings:
     """تنظیمات اجرای بات."""
 
     bot_token: str
-    database_url: str = "sqlite:///hesabyar.db"
+    # داده‌ها روی Google Sheets ذخیره می‌شوند (نه دیتابیس محلی).
+    google_service_account_json: str = ""  # کل محتوای JSON کلید سرویس‌اکانت
+    google_sheet_id: str = ""  # شناسه‌ی اسپردشیت
     default_currency: str = "تومان"
     # ساعت محلی ارسال یادآوری روزانه‌ی سررسیدها (۰ تا ۲۳)
     reminder_hour: int = 9
@@ -87,9 +90,8 @@ class Settings:
     seller_tin: str = ""  # شماره اقتصادی/شناسه‌ی فروشنده
     economic_code: str = ""
     vat_rate: float = 0.10  # نرخ مالیات بر ارزش افزوده
-    # پشتیبان‌گیری
-    backup_dir: str = ""  # پوشه‌ی نگه‌داری پشتیبان دیتابیس (خالی = کنار دیتابیس)
-    backup_weekly: bool = True  # پشتیبان‌گیری هفتگی خودکار دیتابیس
+    # پشتیبان‌گیری هفتگی خودکار (خروجی اکسل اسپردشیت و ارسال به ادمین‌ها)
+    backup_weekly: bool = True
 
     @property
     def ocr_enabled(self) -> bool:
@@ -123,6 +125,14 @@ def load_settings(require_token: bool = True) -> Settings:
             "فایل .env یا محیط سیستم قرار دهید."
         )
 
+    google_json = _get_google_json()
+    sheet_id = _get("GOOGLE_SHEET_ID", "")
+    if require_token and (not google_json or not sheet_id):
+        raise RuntimeError(
+            "تنظیمات Google Sheets ناقص است: GOOGLE_SERVICE_ACCOUNT_JSON_B64 "
+            "(یا GOOGLE_SERVICE_ACCOUNT_JSON) و GOOGLE_SHEET_ID را تنظیم کنید."
+        )
+
     admin_raw = _get("ADMIN_IDS", "")
     admin_ids: tuple[int, ...] = tuple(
         int(part) for part in (admin_raw or "").replace(" ", "").split(",") if part
@@ -130,7 +140,8 @@ def load_settings(require_token: bool = True) -> Settings:
 
     return Settings(
         bot_token=token or "",
-        database_url=_get("DATABASE_URL", "sqlite:///hesabyar.db"),
+        google_service_account_json=google_json,
+        google_sheet_id=sheet_id,
         default_currency=_get("DEFAULT_CURRENCY", "تومان"),
         reminder_hour=_get_int("REMINDER_HOUR", 9),
         reminder_minute=_get_int("REMINDER_MINUTE", 0),
@@ -154,6 +165,20 @@ def load_settings(require_token: bool = True) -> Settings:
         seller_tin=_get("SELLER_TIN", ""),
         economic_code=_get("ECONOMIC_CODE", ""),
         vat_rate=_get_float("VAT_RATE", 0.10),
-        backup_dir=_get("BACKUP_DIR", ""),
         backup_weekly=_get_bool("BACKUP_WEEKLY", True),
     )
+
+
+def _get_google_json() -> str:
+    """محتوای JSON کلید سرویس‌اکانت را از محیط می‌خواند.
+
+    ترجیحاً از ``GOOGLE_SERVICE_ACCOUNT_JSON_B64`` (base64، امن‌تر برای
+    Variables) و در صورت نبود از ``GOOGLE_SERVICE_ACCOUNT_JSON`` خام.
+    """
+    b64 = _get("GOOGLE_SERVICE_ACCOUNT_JSON_B64")
+    if b64:
+        try:
+            return base64.b64decode(b64).decode("utf-8")
+        except Exception:
+            return ""
+    return _get("GOOGLE_SERVICE_ACCOUNT_JSON", "") or ""
