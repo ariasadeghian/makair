@@ -20,7 +20,7 @@ matplotlib.use("Agg")  # بدون نیاز به نمایشگر
 import matplotlib.pyplot as plt  # noqa: E402
 from bidi.algorithm import get_display  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
+from ..db.store import Store  # noqa: E402
 
 from ..core import jalali, money  # noqa: E402
 from . import transactions as tx_service  # noqa: E402
@@ -79,21 +79,21 @@ def _month_window(
     return start, end, jalali.month_name(month)
 
 
-def _gather(session: Session, user_id: int, now: dt.datetime, months: int):
+def _gather(store: Store, user_id: int, now: dt.datetime, months: int):
     monthly = []
     for back in range(months - 1, -1, -1):
         start, end, label = _month_window(now, back)
-        s = tx_service.summary(session, user_id, start, end)
+        s = tx_service.summary(store, user_id, start, end)
         monthly.append(
             {"label": label, "income": s["income"], "expense": s["expense"]}
         )
     c_start, c_end = jalali.month_bounds(now)
-    current = tx_service.summary(session, user_id, c_start, c_end)
+    current = tx_service.summary(store, user_id, c_start, c_end)
     return monthly, current
 
 
 def render_dashboard_png(
-    session: Session,
+    store: Store,
     user_id: int,
     out_path: str,
     now: Optional[dt.datetime] = None,
@@ -103,7 +103,7 @@ def render_dashboard_png(
     """داشبورد مالی کاربر را در یک فایل PNG می‌سازد و مسیرش را برمی‌گرداند."""
     _ensure_font()
     now = now or jalali.now()
-    monthly, current = _gather(session, user_id, now, months)
+    monthly, current = _gather(store, user_id, now, months)
     has_data = any(m["income"] or m["expense"] for m in monthly)
 
     fig = plt.figure(figsize=(10, 7.2), dpi=110)

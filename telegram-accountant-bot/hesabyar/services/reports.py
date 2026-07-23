@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy.orm import Session
-
 from ..core import jalali, money
+from ..db.store import Store
 from . import transactions
 
 # نگاشت نام دوره به تابع بازه‌ی متناظر در ماژول jalali.
@@ -36,7 +35,7 @@ def period_label(period: str) -> str:
 
 
 def build_report(
-    session: Session, user_id: int, base: dt.datetime, period: str
+    store: Store, user_id: int, base: dt.datetime, period: str
 ) -> str:
     """گزارش متنی فارسی برای دوره‌ی خواسته‌شده می‌سازد.
 
@@ -46,7 +45,7 @@ def build_report(
     """
     bounds_fn = _BOUNDS.get(period, jalali.day_bounds)
     start, end = bounds_fn(base)
-    data = transactions.summary(session, user_id, start, end)
+    data = transactions.summary(store, user_id, start, end)
     label = period_label(period)
 
     # عنوان دوره به همراه تاریخ آغاز بازه برای وضوح بیشتر.

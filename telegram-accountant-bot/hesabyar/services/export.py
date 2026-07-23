@@ -13,7 +13,7 @@ import datetime as dt
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
-from sqlalchemy.orm import Session
+from ..db.store import Store
 
 from ..core import jalali
 from ..db.models import Kind, User
@@ -27,7 +27,7 @@ _COLUMN_WIDTHS = {"A": 8, "B": 14, "C": 10, "D": 16, "E": 34, "F": 16}
 
 
 def export_transactions_xlsx(
-    session: Session,
+    store: Store,
     user_id: int,
     start: dt.datetime,
     end: dt.datetime,
@@ -41,14 +41,14 @@ def export_transactions_xlsx(
     ذخیره‌شده (همان ``out_path``) را برمی‌گرداند.
 
     پارامترها:
-        session: نشست دیتابیس.
+        store: لایه‌ی داده (Store).
         user_id: شناسه‌ی عددی کاربر (تلگرام).
         start: زمان آغاز بازه (aware، منطقه‌ی تهران).
         end: زمان پایان بازه (aware، منطقه‌ی تهران).
         out_path: مسیر ذخیره‌ی فایل اکسل.
         business: کاربر/کسب‌وکار برای درج عنوان بالای جدول (اختیاری).
     """
-    txs = transactions.list_transactions(session, user_id, start, end)
+    txs = transactions.list_transactions(store, user_id, start, end)
 
     wb = Workbook()
     ws = wb.active
@@ -83,7 +83,7 @@ def export_transactions_xlsx(
         row += 1
 
     # بخش جمع‌بندی: جمع درآمد، جمع هزینه و مانده در سه سطر جداگانه
-    stats = transactions.summary(session, user_id, start, end)
+    stats = transactions.summary(store, user_id, start, end)
     row += 1  # یک سطر خالی فاصله پیش از جمع‌بندی
     for label, value in (
         ("جمع درآمد", stats["income"]),

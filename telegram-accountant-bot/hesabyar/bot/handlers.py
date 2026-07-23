@@ -50,12 +50,16 @@ _ITEM_SPLIT = re.compile(r"[×✕xX*]")
 
 @contextmanager
 def _session(context: ContextTypes.DEFAULT_TYPE):
-    factory = context.application.bot_data["session_factory"]
-    s = factory()
-    try:
-        yield s
-    finally:
-        s.close()
+    """سازگاری: به‌جای نشست دیتابیس، ``Store`` مشترک را می‌دهد.
+
+    نوشتن‌ها با ``await`` روی همین شیء انجام می‌شوند و ``.commit()`` بی‌اثر است
+    (نوشتن دسته‌ای روی گوگل‌شیت در پس‌زمینه انجام می‌شود).
+    """
+    yield context.application.bot_data["store"]
+
+
+def _store(context: ContextTypes.DEFAULT_TYPE):
+    return context.application.bot_data["store"]
 
 
 def _kind_label(kind: str) -> str:
@@ -81,9 +85,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _clear_flow(context)
     uid = update.effective_user.id
     with _session(context) as session:
-        user = tx_service.get_or_create_user(session, uid)
+        user = await tx_service.get_or_create_user(session, uid)
         # شروع دوره‌ی آزمایشی رایگان برای کاربر جدید
-        sub_service.get_or_create_subscription(session, uid)
+        await sub_service.get_or_create_subscription(session, uid)
         session.commit()
         has_name = bool(user.business_name)
     if has_name:
@@ -112,7 +116,7 @@ async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """دستور /undo — حذف آخرین تراکنش ثبت‌شده."""
     uid = update.effective_user.id
     with _session(context) as session:
-        tx = tx_service.delete_last(session, uid)
+        tx = await tx_service.delete_last(session, uid)
         summary = _tx_summary(tx) if tx else None
     if summary:
         await update.message.reply_text(
@@ -134,7 +138,7 @@ async def on_undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except (IndexError, ValueError):
         return
     with _session(context) as session:
-        tx = tx_service.delete_transaction(session, uid, tx_id)
+        tx = await tx_service.delete_transaction(session, uid, tx_id)
         summary = _tx_summary(tx) if tx else None
     text = texts.UNDO_DONE.format(summary=summary) if summary else texts.UNDO_NONE
     await _safe_edit(query, text)
@@ -154,7 +158,7 @@ async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """دستور /list — تراکنش‌های اخیر با دکمه‌های اصلاح/حذف."""
     uid = update.effective_user.id
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
+        await tx_service.get_or_create_user(session, uid)
         txs = tx_service.recent(session, uid, limit=7)
     if not txs:
         return await update.message.reply_text(
@@ -176,7 +180,7 @@ async def _handle_edit_amount(update, context, text: str) -> None:
     updated = None
     if tx_id is not None:
         with _session(context) as session:
-            updated = tx_service.update_transaction(session, uid, tx_id, amount=amount)
+            updated = await tx_service.update_transaction(session, uid, tx_id, amount=amount)
     _clear_flow(context)
     if updated is None:
         return await update.message.reply_text(
@@ -208,7 +212,7 @@ async def on_tx_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if action == "del":
         await query.answer()
         with _session(context) as session:
-            tx_service.delete_transaction(session, uid, tx_id)
+            await tx_service.delete_transaction(session, uid, tx_id)
         return await _safe_edit(query, texts.TX_DELETED)
 
     if action == "ecat":
@@ -236,7 +240,7 @@ async def on_tx_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if tx is not None:
                 options = categories.category_options(tx.kind)
                 if 0 <= idx < len(options):
-                    tx_service.update_transaction(
+                    await tx_service.update_transaction(
                         session, uid, tx_id, category=options[idx]
                     )
                     new_cat = options[idx]
@@ -253,7 +257,7 @@ async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     out_path = os.path.join(tempfile.gettempdir(), f"hesabyar_export_{uid}.xlsx")
     made = False
     with _session(context) as session:
-        user = tx_service.get_or_create_user(session, uid)
+        user = await tx_service.get_or_create_user(session, uid)
         if tx_service.list_transactions(session, uid, start, end):
             export_service.export_transactions_xlsx(
                 session, uid, start, end, out_path, business=user
@@ -285,7 +289,7 @@ async def _send_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     out_path = os.path.join(tempfile.gettempdir(), f"hesabyar_dash_{uid}.png")
     try:
         with _session(context) as session:
-            user = tx_service.get_or_create_user(session, uid)
+            user = await tx_service.get_or_create_user(session, uid)
             dashboard_service.render_dashboard_png(session, uid, out_path, business=user)
         with open(out_path, "rb") as fh:
             await context.bot.send_photo(
@@ -322,7 +326,7 @@ async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     out_path = os.path.join(tempfile.gettempdir(), f"hesabyar_backup_{uid}.xlsx")
     try:
         with _session(context) as session:
-            user = tx_service.get_or_create_user(session, uid)
+            user = await tx_service.get_or_create_user(session, uid)
             backup_service.export_full_user_xlsx(session, uid, out_path, business=user)
         with open(out_path, "rb") as fh:
             await update.message.reply_document(
@@ -347,7 +351,7 @@ async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     uid = update.effective_user.id
     lines = [texts.SEARCH_HEADER]
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
+        await tx_service.get_or_create_user(session, uid)
         results = tx_service.search_transactions(session, uid, query_text)
         for t in results:
             lines.append(
@@ -420,7 +424,7 @@ async def _handle_onboarding(update, context, text: str) -> None:
         return await update.message.reply_text(texts.WELCOME)
     uid = update.effective_user.id
     with _session(context) as session:
-        user = tx_service.get_or_create_user(session, uid)
+        user = await tx_service.get_or_create_user(session, uid)
         user.business_name = name[:200]
         session.commit()
     _clear_flow(context)
@@ -436,14 +440,14 @@ async def _log_transaction(update, context, text: str) -> None:
         return await update.message.reply_text(texts.UNKNOWN_INPUT)
     uid = update.effective_user.id
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
-        sub_service.get_or_create_subscription(session, uid)
+        await tx_service.get_or_create_user(session, uid)
+        await sub_service.get_or_create_subscription(session, uid)
         if not sub_service.is_active(session, uid):
             session.commit()
             return await update.message.reply_text(
                 texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
             )
-        tx = tx_service.add_transaction(
+        tx = await tx_service.add_transaction(
             session,
             uid,
             kind=parsed.kind,
@@ -472,7 +476,7 @@ async def on_report_period(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     period = query.data.split(":", 1)[1]
     uid = update.effective_user.id
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
+        await tx_service.get_or_create_user(session, uid)
         session.commit()
         report = report_service.build_report(session, uid, jalali.now(), period)
     await query.edit_message_text(report)
@@ -490,7 +494,7 @@ async def on_ledger_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if action == "list":
         with _session(context) as session:
-            tx_service.get_or_create_user(session, uid)
+            await tx_service.get_or_create_user(session, uid)
             session.commit()
             report = ledger_service.build_ledger_report(session, uid)
         return await query.edit_message_text(report)
@@ -529,8 +533,8 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
             due_date = jalali.parse_relative_date(text, jalali.now())
         uid = update.effective_user.id
         with _session(context) as session:
-            tx_service.get_or_create_user(session, uid)
-            ledger_service.add_entry(
+            await tx_service.get_or_create_user(session, uid)
+            await ledger_service.add_entry(
                 session,
                 uid,
                 direction=data["direction"],
@@ -743,8 +747,8 @@ async def _finalize_invoice(update, context) -> None:
     settings = context.application.bot_data["settings"]
 
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
-        sub_service.get_or_create_subscription(session, uid)
+        await tx_service.get_or_create_user(session, uid)
+        await sub_service.get_or_create_subscription(session, uid)
         active = sub_service.is_active(session, uid)
         session.commit()
     if not active:
@@ -762,14 +766,14 @@ async def _finalize_invoice(update, context) -> None:
     img_path = pdf_path = None
     try:
         with _session(context) as session:
-            user = tx_service.get_or_create_user(session, uid)
-            invoice = invoice_service.create_invoice(
+            user = await tx_service.get_or_create_user(session, uid)
+            invoice = await invoice_service.create_invoice(
                 session, uid, customer_name=inv.get("customer_name", "مشتری"),
                 items=items, issue_date=jalali.now().date(),
                 discount=int(inv.get("discount", 0)),
                 shipping=int(inv.get("shipping", 0)),
             )
-            session.commit()
+            await session.flush()  # فاکتور را فوری روی شیت بنویس
             number, invoice_id = invoice.number, invoice.id
             img_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice_id}.png")
             pdf_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice_id}.pdf")
@@ -803,7 +807,7 @@ async def products_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """دستور /products — مدیریت کالاهای ذخیره‌شده."""
     uid = update.effective_user.id
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
+        await tx_service.get_or_create_user(session, uid)
         products = products_service.list_products(session, uid)
     await update.message.reply_text(
         texts.PRODUCTS_HEADER if products else texts.PRODUCTS_EMPTY,
@@ -823,7 +827,7 @@ async def _handle_product_flow(update, context, text: str, flow: str) -> None:
         title = (context.user_data.get("product_tmp") or {}).get("title", "کالا")
         uid = update.effective_user.id
         with _session(context) as session:
-            products_service.add_product(session, uid, title, price)
+            await products_service.add_product(session, uid, title, price)
             products = products_service.list_products(session, uid)
         _clear_flow(context)
         await update.message.reply_text(
@@ -850,7 +854,7 @@ async def on_product_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         except (IndexError, ValueError):
             return await query.answer()
         with _session(context) as session:
-            products_service.delete_product(session, uid, pid)
+            await products_service.delete_product(session, uid, pid)
             products = products_service.list_products(session, uid)
         await query.answer("حذف شد 🗑")
         try:
@@ -867,8 +871,8 @@ async def on_product_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def _show_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
-        sub_service.get_or_create_subscription(session, uid)
+        await tx_service.get_or_create_user(session, uid)
+        await sub_service.get_or_create_subscription(session, uid)
         status = sub_service.status_text(session, uid)
         session.commit()
     await update.message.reply_text(
@@ -926,8 +930,8 @@ async def _handle_payment_flow(
         )
     uid = update.effective_user.id
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
-        payment = sub_service.create_payment(
+        await tx_service.get_or_create_user(session, uid)
+        payment = await sub_service.create_payment(
             session,
             uid,
             plan_key,
@@ -997,16 +1001,16 @@ async def on_payment_review(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     status_text = ""
     with _session(context) as session:
         if action == "approve":
-            payment = sub_service.approve_payment(session, pid, admin_id)
+            payment = await sub_service.approve_payment(session, pid, admin_id)
             if payment is not None:
                 approved = True
                 target_uid = payment.user_id
                 status_text = sub_service.status_text(session, payment.user_id)
         else:
-            payment = sub_service.reject_payment(session, pid, admin_id)
+            payment = await sub_service.reject_payment(session, pid, admin_id)
             if payment is not None:
                 target_uid = payment.user_id
-        session.commit()
+        await session.flush()  # وضعیت پرداخت را فوری روی شیت بنویس
 
     if payment is None:  # قبلاً بررسی شده
         return await _safe_edit(query, texts.ADMIN_PAYMENT_GONE)
@@ -1061,8 +1065,8 @@ async def _start_zarinpal_payment(update, context, plan_key: str, plan: dict) ->
         return await _safe_edit(query, texts.GATEWAY_ERROR)
 
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
-        payment = sub_service.create_payment(
+        await tx_service.get_or_create_user(session, uid)
+        payment = await sub_service.create_payment(
             session, uid, plan_key, plan["price"], reference=res["authority"]
         )
         session.commit()
@@ -1113,11 +1117,12 @@ async def on_zarinpal_verify(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     ref_id = str(result.get("ref_id") or "—")
     with _session(context) as session:
-        approved = sub_service.approve_payment(session, pid, admin_id=0)
+        approved = await sub_service.approve_payment(session, pid, admin_id=0)
         if approved is not None:
             approved.reference = ref_id
+            await session.update("payments", approved)
         status_text = sub_service.status_text(session, uid)
-        session.commit()
+        await session.flush()  # پرداخت آنلاین را فوری روی شیت بنویس
     await _safe_edit(
         query, texts.PAYMENT_VERIFY_OK.format(ref=ref_id, status=status_text)
     )
@@ -1138,7 +1143,7 @@ async def on_moadian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     settings = context.application.bot_data["settings"]
 
     with _session(context) as session:
-        user = tx_service.get_or_create_user(session, uid)
+        user = await tx_service.get_or_create_user(session, uid)
         invoice = invoice_service.get_invoice(session, invoice_id, uid)
         if invoice is None:
             return await _safe_edit(query, texts.MOADIAN_FAILED)
@@ -1198,14 +1203,14 @@ async def _process_receipt_image(
 
     uid = update.effective_user.id
     with _session(context) as session:
-        tx_service.get_or_create_user(session, uid)
-        sub_service.get_or_create_subscription(session, uid)
+        await tx_service.get_or_create_user(session, uid)
+        await sub_service.get_or_create_subscription(session, uid)
         if not sub_service.is_active(session, uid):
             session.commit()
             return await update.message.reply_text(
                 texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
             )
-        tx = tx_service.add_transaction(
+        tx = await tx_service.add_transaction(
             session, uid, kind=parsed.kind, amount=parsed.amount,
             category=parsed.category, description=description,
             occurred_at=parsed.occurred_at,

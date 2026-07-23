@@ -1,40 +1,34 @@
-"""سرویس مدیریت تراکنش‌های درآمد و هزینه.
+"""سرویس تراکنش‌های درآمد و هزینه (روی :class:`Store`).
 
-این ماژول لایه‌ی منطق تجاریِ ثبت، فهرست‌گیری، خلاصه‌گیری و حذف تراکنش‌هاست.
-همه‌ی مبالغ عدد صحیح و به «تومان» هستند و زمان‌ها aware (منطقه‌ی تهران).
+خواندن‌ها همگام (sync، از حافظه) و نوشتن‌ها async (صف‌شونده روی شیت)‌اند.
+همه‌ی مبالغ عدد صحیح و به «تومان»؛ زمان‌ها aware (منطقه‌ی تهران).
 """
 from __future__ import annotations
 
 import datetime as dt
+from typing import Optional
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from ..core import jalali
+from ..db.models import Kind, Transaction, User
+from ..db.store import Store
 
-from ..db.models import Transaction, User
 
-
-def get_or_create_user(
-    session: Session, user_id: int, business_name: str | None = None
+async def get_or_create_user(
+    store: Store, user_id: int, business_name: str | None = None
 ) -> User:
-    """کاربر را برمی‌گرداند و اگر نبود می‌سازد.
-
-    چون :class:`Transaction` کلید خارجی به کاربر دارد، پیش از ثبت هر تراکنش
-    باید کاربر وجود داشته باشد. ``user_id`` همان شناسه‌ی عددی تلگرام است.
-    """
-    user = session.get(User, user_id)
+    """کاربر را برمی‌گرداند و اگر نبود می‌سازد."""
+    user = store.get("users", user_id)
     if user is None:
         user = User(id=user_id, business_name=business_name)
-        session.add(user)
-        session.commit()
+        await store.add("users", user)
     elif business_name and not user.business_name:
-        # نام کسب‌وکار تازه رسیده؛ اگر قبلاً خالی بود، پرش کن.
         user.business_name = business_name
-        session.commit()
+        await store.update("users", user)
     return user
 
 
-def add_transaction(
-    session: Session,
+async def add_transaction(
+    store: Store,
     user_id: int,
     *,
     kind: str,
@@ -43,137 +37,86 @@ def add_transaction(
     description: str,
     occurred_at: dt.datetime,
 ) -> Transaction:
-    """یک تراکنش تازه ثبت می‌کند و شیء ذخیره‌شده را برمی‌گرداند.
-
-    ``kind`` باید یکی از مقادیر :class:`~hesabyar.db.models.Kind` باشد،
-    ``amount`` مبلغ مثبت به تومان و ``occurred_at`` زمان aware رخداد است.
-    """
-    # اطمینان از وجود کاربر برای رعایت کلید خارجی.
-    get_or_create_user(session, user_id)
+    """یک تراکنش تازه ثبت می‌کند و شیء ذخیره‌شده را برمی‌گرداند."""
+    await get_or_create_user(store, user_id)
     tx = Transaction(
-        user_id=user_id,
-        kind=kind,
-        amount=int(amount),
-        category=category,
-        description=description,
-        occurred_at=occurred_at,
+        user_id=user_id, kind=kind, amount=int(amount), category=category,
+        description=description, occurred_at=occurred_at,
     )
-    session.add(tx)
-    session.commit()
+    await store.add("transactions", tx)
     return tx
 
 
 def list_transactions(
-    session: Session,
+    store: Store,
     user_id: int,
     start: dt.datetime,
     end: dt.datetime,
     kind: str | None = None,
 ) -> list[Transaction]:
-    """فهرست تراکنش‌های کاربر در بازه‌ی ``[start, end]`` (هر دو سرشامل).
+    """تراکنش‌های کاربر در بازه‌ی ``[start, end]`` (هر دو سرشامل)، صعودی."""
 
-    اگر ``kind`` داده شود فقط تراکنش‌های همان نوع برمی‌گردند. خروجی بر
-    اساس ``occurred_at`` (و برای پایداری، ``id``) صعودی مرتب است.
-    """
-    stmt = (
-        select(Transaction)
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.occurred_at >= start)
-        .where(Transaction.occurred_at <= end)
-    )
-    if kind is not None:
-        stmt = stmt.where(Transaction.kind == kind)
-    stmt = stmt.order_by(Transaction.occurred_at.asc(), Transaction.id.asc())
-    return list(session.execute(stmt).scalars().all())
+    def _match(t: Transaction) -> bool:
+        if t.user_id != user_id or t.occurred_at is None:
+            return False
+        if not (start <= t.occurred_at <= end):
+            return False
+        return kind is None or t.kind == kind
+
+    rows = store.list("transactions", _match)
+    return sorted(rows, key=lambda t: (t.occurred_at, t.id))
 
 
-def summary(
-    session: Session, user_id: int, start: dt.datetime, end: dt.datetime
-) -> dict:
-    """خلاصه‌ی درآمد و هزینه‌ی کاربر در یک بازه.
-
-    ساختار خروجی::
-
-        {
-            'income': int,                     # جمع درآمد
-            'expense': int,                    # جمع هزینه
-            'balance': int,                    # درآمد منهای هزینه
-            'count': int,                      # تعداد کل تراکنش‌ها
-            'expense_by_category': dict[str, int],
-            'income_by_category': dict[str, int],
-        }
-    """
-    from ..db.models import Kind  # واردسازی محلی برای پرهیز از وابستگی چرخه‌ای
-
-    txs = list_transactions(session, user_id, start, end)
-    income = 0
-    expense = 0
-    income_by_category: dict[str, int] = {}
-    expense_by_category: dict[str, int] = {}
+def summary(store: Store, user_id: int, start: dt.datetime, end: dt.datetime) -> dict:
+    """خلاصه‌ی درآمد/هزینه در یک بازه."""
+    txs = list_transactions(store, user_id, start, end)
+    income = expense = 0
+    income_by: dict[str, int] = {}
+    expense_by: dict[str, int] = {}
     for tx in txs:
         amount = int(tx.amount)
         if tx.kind == Kind.INCOME:
             income += amount
-            income_by_category[tx.category] = (
-                income_by_category.get(tx.category, 0) + amount
-            )
+            income_by[tx.category] = income_by.get(tx.category, 0) + amount
         else:
             expense += amount
-            expense_by_category[tx.category] = (
-                expense_by_category.get(tx.category, 0) + amount
-            )
+            expense_by[tx.category] = expense_by.get(tx.category, 0) + amount
     return {
-        "income": income,
-        "expense": expense,
-        "balance": income - expense,
-        "count": len(txs),
-        "expense_by_category": expense_by_category,
-        "income_by_category": income_by_category,
+        "income": income, "expense": expense, "balance": income - expense,
+        "count": len(txs), "expense_by_category": expense_by,
+        "income_by_category": income_by,
     }
 
 
-def delete_last(session: Session, user_id: int) -> Transaction | None:
-    """آخرین تراکنش ثبت‌شده‌ی کاربر (بر اساس ``id``) را حذف می‌کند.
-
-    شیء حذف‌شده را برمی‌گرداند تا بتوان برای کاربر بازتاب داد؛ اگر
-    تراکنشی نبود ``None``.
-    """
-    stmt = (
-        select(Transaction)
-        .where(Transaction.user_id == user_id)
-        .order_by(Transaction.id.desc())
-        .limit(1)
-    )
-    tx = session.execute(stmt).scalars().first()
-    if tx is None:
+async def delete_last(store: Store, user_id: int) -> Optional[Transaction]:
+    """آخرین تراکنش کاربر (بیشترین id) را حذف می‌کند."""
+    rows = store.list("transactions", lambda t: t.user_id == user_id)
+    if not rows:
         return None
-    session.delete(tx)
-    session.commit()
-    return tx
-
-
-def delete_transaction(
-    session: Session, user_id: int, transaction_id: int
-) -> Transaction | None:
-    """یک تراکنش مشخص را حذف می‌کند (فقط اگر متعلق به همین کاربر باشد)."""
-    tx = session.get(Transaction, transaction_id)
-    if tx is None or tx.user_id != user_id:
-        return None
-    session.delete(tx)
-    session.commit()
+    tx = max(rows, key=lambda t: t.id)
+    await store.delete("transactions", tx.id)
     return tx
 
 
 def get_transaction(
-    session: Session, user_id: int, transaction_id: int
-) -> Transaction | None:
-    """یک تراکنش را (فقط اگر متعلق به همین کاربر باشد) برمی‌گرداند."""
-    tx = session.get(Transaction, transaction_id)
+    store: Store, user_id: int, transaction_id: int
+) -> Optional[Transaction]:
+    tx = store.get("transactions", transaction_id)
     return tx if tx is not None and tx.user_id == user_id else None
 
 
-def update_transaction(
-    session: Session,
+async def delete_transaction(
+    store: Store, user_id: int, transaction_id: int
+) -> Optional[Transaction]:
+    tx = get_transaction(store, user_id, transaction_id)
+    if tx is None:
+        return None
+    await store.delete("transactions", tx.id)
+    return tx
+
+
+async def update_transaction(
+    store: Store,
     user_id: int,
     transaction_id: int,
     *,
@@ -181,9 +124,8 @@ def update_transaction(
     category: str | None = None,
     description: str | None = None,
     kind: str | None = None,
-) -> Transaction | None:
-    """فیلدهای یک تراکنش را ویرایش می‌کند (فقط مقادیر داده‌شده)."""
-    tx = get_transaction(session, user_id, transaction_id)
+) -> Optional[Transaction]:
+    tx = get_transaction(store, user_id, transaction_id)
     if tx is None:
         return None
     if amount is not None:
@@ -194,37 +136,30 @@ def update_transaction(
         tx.description = description
     if kind is not None:
         tx.kind = kind
-    session.commit()
+    await store.update("transactions", tx)
     return tx
 
 
-def recent(session: Session, user_id: int, limit: int = 10) -> list[Transaction]:
-    """آخرین تراکنش‌های کاربر، جدیدترین‌ها اول."""
-    stmt = (
-        select(Transaction)
-        .where(Transaction.user_id == user_id)
-        .order_by(Transaction.occurred_at.desc(), Transaction.id.desc())
-        .limit(limit)
-    )
-    return list(session.execute(stmt).scalars().all())
+def _recency_key(t: Transaction):
+    return (t.occurred_at or t.created_at or jalali.now(), t.id)
+
+
+def recent(store: Store, user_id: int, limit: int = 10) -> list[Transaction]:
+    rows = store.list("transactions", lambda t: t.user_id == user_id)
+    rows.sort(key=_recency_key, reverse=True)
+    return rows[:limit]
 
 
 def search_transactions(
-    session: Session, user_id: int, query: str, limit: int = 15
+    store: Store, user_id: int, query: str, limit: int = 15
 ) -> list[Transaction]:
-    """جست‌وجوی تراکنش‌ها بر اساس شرح یا دسته (شامل عبارت).
-
-    نتایج جدیدترین‌ها اول و حداکثر ``limit`` مورد.
-    """
     q = (query or "").strip()
     if not q:
         return []
-    like = f"%{q}%"
-    stmt = (
-        select(Transaction)
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.description.like(like) | Transaction.category.like(like))
-        .order_by(Transaction.occurred_at.desc(), Transaction.id.desc())
-        .limit(limit)
+    rows = store.list(
+        "transactions",
+        lambda t: t.user_id == user_id
+        and (q in (t.description or "") or q in (t.category or "")),
     )
-    return list(session.execute(stmt).scalars().all())
+    rows.sort(key=_recency_key, reverse=True)
+    return rows[:limit]

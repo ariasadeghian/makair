@@ -1,44 +1,38 @@
-"""سرویس کالاهای ذخیره‌شده (برای ساخت سریع فاکتور)."""
+"""سرویس کالاهای ذخیره‌شده (روی :class:`Store`)."""
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from typing import Optional
 
-from .transactions import get_or_create_user
 from ..db.models import Product
+from ..db.store import Store
+from .transactions import get_or_create_user
 
 
-def add_product(
-    session: Session, user_id: int, title: str, unit_price: int
+async def add_product(
+    store: Store, user_id: int, title: str, unit_price: int
 ) -> Product:
-    """یک کالا با قیمت پیش‌فرض ذخیره می‌کند."""
-    get_or_create_user(session, user_id)
+    await get_or_create_user(store, user_id)
     product = Product(user_id=user_id, title=title.strip()[:200], unit_price=int(unit_price))
-    session.add(product)
-    session.commit()
+    await store.add("products", product)
     return product
 
 
-def list_products(session: Session, user_id: int, limit: int = 30) -> list[Product]:
-    """فهرست کالاهای کاربر (جدیدترین‌ها اول)."""
-    stmt = (
-        select(Product)
-        .where(Product.user_id == user_id)
-        .order_by(Product.id.desc())
-        .limit(limit)
-    )
-    return list(session.execute(stmt).scalars().all())
+def list_products(store: Store, user_id: int, limit: int = 30) -> list[Product]:
+    rows = store.list("products", lambda p: p.user_id == user_id)
+    rows.sort(key=lambda p: p.id, reverse=True)
+    return rows[:limit]
 
 
-def get_product(session: Session, user_id: int, product_id: int) -> Product | None:
-    product = session.get(Product, product_id)
+def get_product(store: Store, user_id: int, product_id: int) -> Optional[Product]:
+    product = store.get("products", product_id)
     return product if product is not None and product.user_id == user_id else None
 
 
-def delete_product(session: Session, user_id: int, product_id: int) -> Product | None:
-    product = get_product(session, user_id, product_id)
+async def delete_product(
+    store: Store, user_id: int, product_id: int
+) -> Optional[Product]:
+    product = get_product(store, user_id, product_id)
     if product is None:
         return None
-    session.delete(product)
-    session.commit()
+    await store.delete("products", product.id)
     return product
