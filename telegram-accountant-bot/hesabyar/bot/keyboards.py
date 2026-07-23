@@ -76,7 +76,8 @@ def report_periods() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("امروز", callback_data="report:day"),
                 InlineKeyboardButton("این هفته", callback_data="report:week"),
                 InlineKeyboardButton("این ماه", callback_data="report:month"),
-            ]
+            ],
+            [InlineKeyboardButton(texts.BTN_DASHBOARD, callback_data="dash:show")],
         ]
     )
 

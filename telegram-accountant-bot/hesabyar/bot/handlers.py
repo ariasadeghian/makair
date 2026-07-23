@@ -27,6 +27,7 @@ from ..core import jalali, money, nlp
 from ..db.models import Direction, Kind, PaymentStatus
 from ..pdf.invoice_pdf import render_invoice_pdf
 from ..services import backup as backup_service
+from ..services import dashboard as dashboard_service
 from ..services import export as export_service
 from ..services import gateway as gateway_service
 from ..services import invoices as invoice_service
@@ -165,6 +166,42 @@ async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 os.remove(out_path)
             except OSError:
                 pass
+
+
+async def _send_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    chat_id = update.effective_chat.id
+    out_path = os.path.join(tempfile.gettempdir(), f"hesabyar_dash_{uid}.png")
+    try:
+        with _session(context) as session:
+            user = tx_service.get_or_create_user(session, uid)
+            dashboard_service.render_dashboard_png(session, uid, out_path, business=user)
+        with open(out_path, "rb") as fh:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=fh,
+                caption=texts.DASHBOARD_CAPTION,
+                reply_markup=keyboards.main_menu(),
+            )
+    finally:
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+
+async def dashboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /dashboard — داشبورد مالی تصویری."""
+    await update.message.reply_text(texts.DASHBOARD_GENERATING)
+    await _send_dashboard(update, context)
+
+
+async def on_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌ی «داشبورد تصویری» زیر انتخاب دوره‌ی گزارش."""
+    query = update.callback_query
+    await query.answer(texts.DASHBOARD_GENERATING)
+    await _send_dashboard(update, context)
 
 
 async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -841,7 +878,9 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("export", export_cmd))
     application.add_handler(CommandHandler("search", search_cmd))
     application.add_handler(CommandHandler("backup", backup_cmd))
+    application.add_handler(CommandHandler("dashboard", dashboard_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
+    application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
     application.add_handler(CallbackQueryHandler(on_subscription, pattern=r"^sub:"))
     application.add_handler(CallbackQueryHandler(on_payment_review, pattern=r"^pay:"))
