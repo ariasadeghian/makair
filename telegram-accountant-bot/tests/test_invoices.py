@@ -31,26 +31,26 @@ def _sample_items() -> list[dict]:
 
 
 class TestNextInvoiceNumber:
-    def test_starts_from_one(self, session):
-        transactions.get_or_create_user(session, USER_ID)
+    async def test_starts_from_one(self, store):
+        await transactions.get_or_create_user(store, USER_ID)
         display, seq = invoices.next_invoice_number(
-            session, USER_ID, _dt(1403, 5, 1)
+            store, USER_ID, _dt(1403, 5, 1)
         )
         assert seq == 1
         # سال شمسی و شماره‌ی چهاررقمی با ارقام فارسی.
         assert display == money.to_persian_digits("1403-0001")
 
-    def test_uses_base_jalali_year(self, session):
-        transactions.get_or_create_user(session, USER_ID)
+    async def test_uses_base_jalali_year(self, store):
+        await transactions.get_or_create_user(store, USER_ID)
         display, seq = invoices.next_invoice_number(
-            session, USER_ID, _dt(1402, 12, 20)
+            store, USER_ID, _dt(1402, 12, 20)
         )
         assert seq == 1
         assert display.startswith(money.to_persian_digits("1402"))
 
-    def test_increments_after_existing(self, session):
-        invoices.create_invoice(
-            session,
+    async def test_increments_after_existing(self, store):
+        await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری اول",
             items=_sample_items(),
@@ -58,15 +58,15 @@ class TestNextInvoiceNumber:
             base=_dt(1403, 5, 1),
         )
         display, seq = invoices.next_invoice_number(
-            session, USER_ID, _dt(1403, 5, 2)
+            store, USER_ID, _dt(1403, 5, 2)
         )
         assert seq == 2
         assert display == money.to_persian_digits("1403-0002")
 
-    def test_per_user_sequence(self, session):
+    async def test_per_user_sequence(self, store):
         # فاکتور کاربر اول نباید بر شماره‌ی کاربر دوم اثر بگذارد.
-        invoices.create_invoice(
-            session,
+        await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری کاربر اول",
             items=_sample_items(),
@@ -74,15 +74,15 @@ class TestNextInvoiceNumber:
             base=_dt(1403, 5, 1),
         )
         _, seq = invoices.next_invoice_number(
-            session, OTHER_USER_ID, _dt(1403, 5, 1)
+            store, OTHER_USER_ID, _dt(1403, 5, 1)
         )
         assert seq == 1
 
 
 class TestCreateInvoice:
-    def test_creates_user_and_persists(self, session):
-        invoice = invoices.create_invoice(
-            session,
+    async def test_creates_user_and_persists(self, store):
+        invoice = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="آقای کریمی",
             items=_sample_items(),
@@ -103,13 +103,11 @@ class TestCreateInvoice:
         # اقلام باید ذخیره شده باشند.
         assert len(invoice.items) == 2
         # کاربر باید به‌صورت خودکار ساخته شده باشد (کلید خارجی).
-        from hesabyar.db.models import User
+        assert store.get("users", USER_ID) is not None
 
-        assert session.get(User, USER_ID) is not None
-
-    def test_total_is_correct(self, session):
-        invoice = invoices.create_invoice(
-            session,
+    async def test_total_is_correct(self, store):
+        invoice = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری",
             items=_sample_items(),
@@ -121,9 +119,9 @@ class TestCreateInvoice:
         assert invoice.items[0].line_total == 60_000_000
         assert invoice.items[1].line_total == 1_500_000
 
-    def test_defaults_and_optional_fields(self, session):
-        invoice = invoices.create_invoice(
-            session,
+    async def test_defaults_and_optional_fields(self, store):
+        invoice = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="بدون جزئیات",
             items=[{"title": "کالا", "quantity": 1, "unit_price": 1000}],
@@ -134,10 +132,10 @@ class TestCreateInvoice:
         assert invoice.customer_address == ""
         assert invoice.note == ""
 
-    def test_base_defaults_to_now(self, session):
+    async def test_base_defaults_to_now(self, store):
         # بدون دادن base باید سال جاری شمسی استفاده شود و خطا ندهد.
-        invoice = invoices.create_invoice(
-            session,
+        invoice = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری امروز",
             items=[{"title": "کالا", "quantity": 1, "unit_price": 2000}],
@@ -146,17 +144,17 @@ class TestCreateInvoice:
         current_year = jalali.to_jalali(jalali.now()).year
         assert invoice.number.startswith(money.to_persian_digits(str(current_year)))
 
-    def test_two_invoices_increasing_and_unique(self, session):
-        first = invoices.create_invoice(
-            session,
+    async def test_two_invoices_increasing_and_unique(self, store):
+        first = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری الف",
             items=_sample_items(),
             issue_date=_date(1403, 5, 1),
             base=_dt(1403, 5, 1),
         )
-        second = invoices.create_invoice(
-            session,
+        second = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری ب",
             items=[{"title": "کالای دوم", "quantity": 1, "unit_price": 10_000}],
@@ -174,83 +172,83 @@ class TestCreateInvoice:
 
 
 class TestGetInvoice:
-    def test_returns_owned_invoice(self, session):
-        invoice = invoices.create_invoice(
-            session,
+    async def test_returns_owned_invoice(self, store):
+        invoice = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری",
             items=_sample_items(),
             issue_date=_date(1403, 5, 10),
             base=_dt(1403, 5, 10),
         )
-        fetched = invoices.get_invoice(session, invoice.id, USER_ID)
+        fetched = invoices.get_invoice(store, invoice.id, USER_ID)
         assert fetched is not None
         assert fetched.id == invoice.id
 
-    def test_wrong_user_returns_none(self, session):
-        invoice = invoices.create_invoice(
-            session,
+    async def test_wrong_user_returns_none(self, store):
+        invoice = await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="مشتری",
             items=_sample_items(),
             issue_date=_date(1403, 5, 10),
             base=_dt(1403, 5, 10),
         )
-        transactions.get_or_create_user(session, OTHER_USER_ID)
-        assert invoices.get_invoice(session, invoice.id, OTHER_USER_ID) is None
+        await transactions.get_or_create_user(store, OTHER_USER_ID)
+        assert invoices.get_invoice(store, invoice.id, OTHER_USER_ID) is None
 
-    def test_missing_invoice_returns_none(self, session):
-        transactions.get_or_create_user(session, USER_ID)
-        assert invoices.get_invoice(session, 999_999, USER_ID) is None
+    async def test_missing_invoice_returns_none(self, store):
+        await transactions.get_or_create_user(store, USER_ID)
+        assert invoices.get_invoice(store, 999_999, USER_ID) is None
 
 
 class TestListInvoices:
-    def test_ordered_desc_by_seq(self, session):
+    async def test_ordered_desc_by_seq(self, store):
         for day in range(1, 4):
-            invoices.create_invoice(
-                session,
+            await invoices.create_invoice(
+                store,
                 USER_ID,
                 customer_name=f"مشتری {day}",
                 items=[{"title": "کالا", "quantity": 1, "unit_price": 1000}],
                 issue_date=_date(1403, 5, day),
                 base=_dt(1403, 5, day),
             )
-        rows = invoices.list_invoices(session, USER_ID)
+        rows = invoices.list_invoices(store, USER_ID)
         seqs = [r.seq for r in rows]
         assert seqs == [3, 2, 1]
 
-    def test_respects_limit(self, session):
+    async def test_respects_limit(self, store):
         for day in range(1, 5):
-            invoices.create_invoice(
-                session,
+            await invoices.create_invoice(
+                store,
                 USER_ID,
                 customer_name=f"مشتری {day}",
                 items=[{"title": "کالا", "quantity": 1, "unit_price": 1000}],
                 issue_date=_date(1403, 5, day),
                 base=_dt(1403, 5, day),
             )
-        rows = invoices.list_invoices(session, USER_ID, limit=2)
+        rows = invoices.list_invoices(store, USER_ID, limit=2)
         assert len(rows) == 2
         # جدیدترین‌ها (بزرگ‌ترین seq) باید بیایند.
         assert [r.seq for r in rows] == [4, 3]
 
-    def test_only_own_invoices(self, session):
-        invoices.create_invoice(
-            session,
+    async def test_only_own_invoices(self, store):
+        await invoices.create_invoice(
+            store,
             USER_ID,
             customer_name="کاربر اول",
             items=_sample_items(),
             issue_date=_date(1403, 5, 1),
             base=_dt(1403, 5, 1),
         )
-        invoices.create_invoice(
-            session,
+        await invoices.create_invoice(
+            store,
             OTHER_USER_ID,
             customer_name="کاربر دوم",
             items=_sample_items(),
             issue_date=_date(1403, 5, 1),
             base=_dt(1403, 5, 1),
         )
-        rows = invoices.list_invoices(session, USER_ID)
+        rows = invoices.list_invoices(store, USER_ID)
         assert len(rows) == 1
         assert rows[0].user_id == USER_ID

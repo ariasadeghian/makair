@@ -16,16 +16,16 @@ _SAMPLES = [
 ]
 
 
-def test_export_transactions_xlsx(session, tmp_path):
+async def test_export_transactions_xlsx(store, tmp_path):
     """فایل اکسل ساخته می‌شود و محتوای آن با تراکنش‌ها همخوان است."""
     user_id = 12345
-    transactions.get_or_create_user(session, user_id, business_name="کافه من")
+    await transactions.get_or_create_user(store, user_id, business_name="کافه من")
 
     # چند تراکنش درآمد/هزینه با زمان مشخص (aware تهران، از jalali.now())
     now = jalali.now()
     for kind, amount, category, description in _SAMPLES:
-        transactions.add_transaction(
-            session,
+        await transactions.add_transaction(
+            store,
             user_id,
             kind=kind,
             amount=amount,
@@ -38,7 +38,7 @@ def test_export_transactions_xlsx(session, tmp_path):
     start, end = jalali.month_bounds(now)
     out_path = str(tmp_path / "report.xlsx")
 
-    result = export_transactions_xlsx(session, user_id, start, end, out_path)
+    result = export_transactions_xlsx(store, user_id, start, end, out_path)
 
     # مسیر برگشتی همان مسیر خروجی است و فایل روی دیسک ساخته شده
     assert result == out_path

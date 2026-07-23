@@ -1,25 +1,14 @@
-"""Fixtureهای مشترک تست."""
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
+"""Fixtureهای مشترک تست (Store روی اسپردشیت ساختگی)."""
+import pytest_asyncio
 
-from hesabyar.db.database import init_db, make_session_factory
+from fakes import FakeSpreadsheet
+
+from hesabyar.db.store import Store
 
 
-@pytest.fixture
-def session():
-    """نشست SQLite در حافظه با یک اتصال ثابت (StaticPool)."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        future=True,
-    )
-    init_db(engine)
-    SessionLocal = make_session_factory(engine)
-    s = SessionLocal()
-    try:
-        yield s
-    finally:
-        s.close()
-        engine.dispose()
+@pytest_asyncio.fixture
+async def store():
+    """یک Store خالی روی اسپردشیت ساختگی (بدون شبکه)."""
+    s = Store(FakeSpreadsheet())
+    await s.load()
+    return s
