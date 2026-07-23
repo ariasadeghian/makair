@@ -29,19 +29,45 @@
 - `detect_category(text: str, kind: str) -> str`
 
 ### `hesabyar.db.models`
-- `Base`, `User`, `Transaction`, `LedgerEntry`, `Invoice`, `InvoiceItem`
+- مدل‌ها **دیتاکلاس** ساده‌اند (نه ORM): `User`, `Transaction`, `LedgerEntry`,
+  `Invoice`, `InvoiceItem`, `Subscription`, `Payment`, `Product`.
+- هر مدل classvarهای `TABLE` (نام تب) و `COLUMNS` (ترتیب ستون‌ها) و متدهای
+  `to_row() -> list` و `from_row(cls, dict) -> obj` دارد (سریال‌سازی برای شیت:
+  datetime/date به ISO، bool به `"TRUE"`/`"FALSE"`).
 - `Kind.INCOME`, `Kind.EXPENSE`
 - `Direction.RECEIVABLE` (طلب من)، `Direction.PAYABLE` (بدهی من)
-- `Invoice.total` (property)، `InvoiceItem.line_total` (property)
+- `Invoice.subtotal`/`Invoice.total` (property؛ با discount/shipping)،
+  `InvoiceItem.line_total` (property). `Invoice.items` غیرِ persist است و توسط
+  سرویس پر می‌شود.
+- `ALL_MODELS` و `TABLE_MODELS = {TABLE: model}`.
 
-### `hesabyar.db.database`
-- `make_engine(url) -> Engine`
-- `init_db(engine)`
-- `make_session_factory(engine) -> sessionmaker`
+### `hesabyar.db.sheets_client`
+- `get_gspread_client(settings)` — از `settings.google_service_account_json`
+- `open_spreadsheet(client, sheet_id)`
+- `ensure_worksheets(spreadsheet)` — تب‌های همه‌ی مدل‌ها را idempotent می‌سازد
+- `read_all_records(ws) -> list[dict]`، `overwrite_worksheet(ws, header, rows)`
+- `with_retry(fn, ...)` — backoff نمایی روی خطاهای نرخ/سرور (429/5xx)
+
+### `hesabyar.db.store.Store`
+- منبعِ حقیقت در حافظه روی یک اسپردشیت. سازنده: `Store(spreadsheet)`.
+- `await load()` — همه‌ی تب‌ها را می‌خواند و اشیاء را می‌سازد.
+- خواندن (sync): `get(table, id)`، `list(table, predicate=None)`، `next_id(table)`.
+- نوشتن (async): `await add(table, obj)`، `await update(table, obj)`،
+  `await delete(table, id)` — روی حافظه اعمال و تب را dirty می‌کنند.
+- `await flush()` — تب‌های dirty را روی شیت بازنویسی می‌کند.
+- `start_background_flush(interval=5)` و `await stop()` (flush قطعی).
+- `commit()` — no-op (سازگاری با کد قدیمی).
 
 ---
 
 ## ماژول‌هایی که باید ساخته شوند
+
+> **به‌روزرسانی (مهاجرت به Google Sheets):** سرویس‌های زیر دیگر `session`
+> نمی‌گیرند بلکه `store` (نمونه‌ی `Store`). توابعِ **نوشتن** async شده‌اند و باید
+> `await` شوند (مثل `get_or_create_user`, `add_transaction`, `delete_transaction`,
+> `add_entry`, `settle`, `create_invoice`, `add_product`, `create_payment`,
+> `approve_payment` ...)؛ توابعِ **خواندن** هم‌چنان sync‌اند. در امضاهای پایین
+> `session` را ذهناً `store` و نوشتن‌ها را `async`/`await` بخوانید.
 
 ### `hesabyar.core.nlp`
 ```python
@@ -126,6 +152,7 @@ def render_invoice_pdf(invoice, business, out_path: str) -> str   # مسیر ف�
 
 ## قواعد مشترک
 - همه‌ی رشته‌های نمایشی فارسی؛ مبالغ با `money.format_amount`؛ تاریخ‌ها با `jalali`.
-- تست‌ها با SQLite در حافظه (`sqlite://`) و بدون شبکه.
+- تست‌ها با یک اسپردشیتِ ساختگی در حافظه (`tests/fakes.py`) و بدون شبکه؛
+  fixtureی `store` در `tests/conftest.py`. حالت async با `asyncio_mode=auto`.
 - هر ماژول تست خودش را دارد؛ فقط تست خودتان را اجرا کنید:
   `cd telegram-accountant-bot && python -m pytest tests/<file> -q`
