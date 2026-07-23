@@ -23,12 +23,13 @@ from telegram.ext import (
 )
 
 from .. import plans
-from ..core import jalali, money, nlp
+from ..core import jalali, money
 from ..db.models import Direction, Kind, PaymentStatus
 from ..pdf.invoice_pdf import render_invoice_pdf
 from ..services import backup as backup_service
 from ..services import dashboard as dashboard_service
 from ..services import export as export_service
+from ..services import extract as extract_service
 from ..services import gateway as gateway_service
 from ..services import ingest as ingest_service
 from ..services import invoices as invoice_service
@@ -316,7 +317,8 @@ async def _handle_onboarding(update, context, text: str) -> None:
 
 
 async def _log_transaction(update, context, text: str) -> None:
-    parsed = nlp.parse_transaction(text, base=jalali.now())
+    settings = context.application.bot_data["settings"]
+    parsed = await extract_service.extract_transaction(settings, text, base=jalali.now())
     if parsed is None:
         return await update.message.reply_text(texts.UNKNOWN_INPUT)
     uid = update.effective_user.id
@@ -841,9 +843,17 @@ async def _process_receipt_image(
     except Exception:
         return await update.message.reply_text(texts.OCR_FAILED)
 
-    parsed = ocr_service.parse_receipt_text(extracted, base=jalali.now())
+    settings = context.application.bot_data["settings"]
+    parsed = await extract_service.extract_transaction(
+        settings, extracted, base=jalali.now()
+    )
     if parsed is None:
         return await update.message.reply_text(texts.OCR_FAILED)
+
+    vendor = getattr(parsed, "vendor", "")
+    description = parsed.description or ""
+    if vendor and vendor not in description:
+        description = f"{vendor} — {description}".strip(" —")
 
     uid = update.effective_user.id
     with _session(context) as session:
@@ -856,18 +866,27 @@ async def _process_receipt_image(
             )
         tx = tx_service.add_transaction(
             session, uid, kind=parsed.kind, amount=parsed.amount,
-            category=parsed.category, description=parsed.description,
+            category=parsed.category, description=description,
             occurred_at=parsed.occurred_at,
         )
         session.commit()
         tx_id = tx.id
-    msg = (
-        f"{source_label} ثبت شد:\n"
+
+    lines = [
+        f"{source_label} ثبت شد:",
         f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} — "
-        f"{money.format_amount(parsed.amount)}\n"
-        f"دسته: {parsed.category}"
+        f"{money.format_amount(parsed.amount)}",
+        f"دسته: {parsed.category}",
+    ]
+    if vendor:
+        lines.append(f"فروشنده: {vendor}")
+    lines.append(f"تاریخ: {jalali.format_date(parsed.occurred_at)}")
+    invoice_number = getattr(parsed, "invoice_number", "")
+    if invoice_number:
+        lines.append(f"شماره فاکتور: {invoice_number}")
+    await update.message.reply_text(
+        "\n".join(lines), reply_markup=keyboards.undo_transaction(tx_id)
     )
-    await update.message.reply_text(msg, reply_markup=keyboards.undo_transaction(tx_id))
 
 
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

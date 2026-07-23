@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Optional
 
@@ -93,6 +94,29 @@ class ParsedTransaction:
     raw: str
 
 
+def _is_letter(ch: str) -> bool:
+    """آیا این نویسه یک «حرف» است؟ (ارقام و فاصله و نگارش، مرزشکن نیستند.)"""
+    return bool(ch) and unicodedata.category(ch)[0] == "L"
+
+
+def _keyword_max_pos(haystack: str, keywords: tuple[str, ...]) -> int:
+    """بیشترین موقعیت شروعِ یک کلیدواژه که به‌صورت «واژه‌ی کامل» آمده باشد.
+
+    مرزآگاه است تا مثلاً «فروش» داخل «فروشگاه» یا «فروشنده» تشخیص داده نشود.
+    اگر هیچ کلیدواژه‌ای نباشد ``-1``.
+    """
+    best = -1
+    for kw in keywords:
+        for match in re.finditer(re.escape(kw), haystack):
+            start, end = match.start(), match.end()
+            before = haystack[start - 1] if start > 0 else ""
+            after = haystack[end] if end < len(haystack) else ""
+            if _is_letter(before) or _is_letter(after):
+                continue  # بخشی از یک واژه‌ی بزرگ‌تر است
+            best = max(best, start)
+    return best
+
+
 def _detect_kind(text: str) -> str:
     """تشخیص نوع تراکنش بر اساس کلیدواژه‌ها.
 
@@ -101,14 +125,8 @@ def _detect_kind(text: str) -> str:
     پیش‌فرض «هزینه» برمی‌گردد.
     """
     haystack = (text or "").replace("‌", " ")
-    income_pos = max(
-        (haystack.find(kw) for kw in INCOME_KEYWORDS if kw in haystack),
-        default=-1,
-    )
-    expense_pos = max(
-        (haystack.find(kw) for kw in EXPENSE_KEYWORDS if kw in haystack),
-        default=-1,
-    )
+    income_pos = _keyword_max_pos(haystack, INCOME_KEYWORDS)
+    expense_pos = _keyword_max_pos(haystack, EXPENSE_KEYWORDS)
     if income_pos > expense_pos:
         return Kind.INCOME
     return Kind.EXPENSE

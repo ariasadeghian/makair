@@ -64,6 +64,12 @@ class Settings:
     ocr_base_url: str | None = None
     ocr_api_key: str | None = None
     ocr_model: str = "gpt-4o-mini"
+    # استخراج هوشمند با LLM (دسته‌بندی/فروشنده/تاریخ). اگر LLM_* تنظیم نشود،
+    # از همان تنظیمات OCR استفاده می‌شود.
+    use_llm_parser: bool = False
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
     admin_ids: tuple[int, ...] = field(default_factory=tuple)
     # پرداخت کارت‌به‌کارت اشتراک
     card_number: str = ""
@@ -88,6 +94,20 @@ class Settings:
     @property
     def ocr_enabled(self) -> bool:
         return bool(self.ocr_base_url and self.ocr_api_key)
+
+    @property
+    def llm_creds(self) -> tuple[str, str, str] | None:
+        """(base_url, api_key, model) برای LLM؛ با fallback به تنظیمات OCR."""
+        base = self.llm_base_url or self.ocr_base_url
+        key = self.llm_api_key or self.ocr_api_key
+        model = self.llm_model or self.ocr_model
+        if base and key:
+            return (base, key, model)
+        return None
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self.use_llm_parser and self.llm_creds is not None
 
 
 def load_settings(require_token: bool = True) -> Settings:
@@ -117,6 +137,10 @@ def load_settings(require_token: bool = True) -> Settings:
         ocr_base_url=_get("OCR_BASE_URL"),
         ocr_api_key=_get("OCR_API_KEY"),
         ocr_model=_get("OCR_MODEL", "gpt-4o-mini"),
+        use_llm_parser=_get_bool("USE_LLM_PARSER", False),
+        llm_base_url=_get("LLM_BASE_URL"),
+        llm_api_key=_get("LLM_API_KEY"),
+        llm_model=_get("LLM_MODEL"),
         admin_ids=admin_ids,
         card_number=_get("CARD_NUMBER", ""),
         card_holder=_get("CARD_HOLDER", ""),
