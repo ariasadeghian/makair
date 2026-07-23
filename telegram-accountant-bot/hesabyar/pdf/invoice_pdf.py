@@ -73,6 +73,20 @@ def register_font() -> str:
     return _FONT_NAME
 
 
+#: نشانه‌ی چپ‌به‌راست (U+200E) برای نگه‌داشتن ترتیب توکن‌های عددی/لاتین
+_LRM = "‎"
+
+
+def ltr(text: str) -> str:
+    """یک توکن را با نشانه‌ی چپ‌به‌راست احاطه می‌کند.
+
+    برای رشته‌هایی مثل شماره‌ی فاکتور «۱۴۰۵-۰۰۰۲» که خط تیره دارند لازم است؛
+    وگرنه الگوریتم دوجهته در متن راست‌به‌چپ دو بخش عدد را جابه‌جا نشان می‌دهد
+    («۰۰۰۲-۱۴۰۵»).
+    """
+    return f"{_LRM}{text}{_LRM}"
+
+
 def shape_fa(text: str) -> str:
     """متن فارسی را برای نمایش راست‌به‌چپ آماده می‌کند.
 
@@ -145,7 +159,7 @@ def render_invoice_pdf(invoice: Any, business: Any, out_path: str) -> str:
     number = getattr(invoice, "number", "") or ""
     issue_date = getattr(invoice, "issue_date", None)
     date_text = jalali.format_date(issue_date) if issue_date is not None else ""
-    story.append(_para(f"شماره فاکتور: {number}", normal_style))
+    story.append(_para(f"شماره فاکتور: {ltr(number)}", normal_style))
     story.append(_para(f"تاریخ: {date_text}", normal_style))
     story.append(Spacer(1, 4 * mm))
 

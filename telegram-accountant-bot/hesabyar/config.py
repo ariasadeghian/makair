@@ -48,6 +48,10 @@ class Settings:
     ocr_api_key: str | None = None
     ocr_model: str = "gpt-4o-mini"
     admin_ids: tuple[int, ...] = field(default_factory=tuple)
+    # پرداخت کارت‌به‌کارت اشتراک
+    card_number: str = ""
+    card_holder: str = ""
+    trial_days: int = 14
 
     @property
     def ocr_enabled(self) -> bool:
@@ -82,4 +86,7 @@ def load_settings(require_token: bool = True) -> Settings:
         ocr_api_key=_get("OCR_API_KEY"),
         ocr_model=_get("OCR_MODEL", "gpt-4o-mini"),
         admin_ids=admin_ids,
+        card_number=_get("CARD_NUMBER", ""),
+        card_holder=_get("CARD_HOLDER", ""),
+        trial_days=_get_int("TRIAL_DAYS", 14),
     )

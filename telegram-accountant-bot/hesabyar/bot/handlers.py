@@ -21,6 +21,7 @@ from telegram.ext import (
     filters,
 )
 
+from .. import plans
 from ..core import jalali, money, nlp
 from ..db.models import Direction, Kind
 from ..pdf.invoice_pdf import render_invoice_pdf
@@ -28,6 +29,7 @@ from ..services import invoices as invoice_service
 from ..services import ledger as ledger_service
 from ..services import ocr as ocr_service
 from ..services import reports as report_service
+from ..services import subscription as sub_service
 from ..services import transactions as tx_service
 from . import keyboards, texts
 
@@ -69,6 +71,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     with _session(context) as session:
         user = tx_service.get_or_create_user(session, uid)
+        # شروع دوره‌ی آزمایشی رایگان برای کاربر جدید
+        sub_service.get_or_create_subscription(session, uid)
         session.commit()
         has_name = bool(user.business_name)
     if has_name:
@@ -103,6 +107,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await _handle_ledger_flow(update, context, text, flow)
     if flow in ("invoice_customer", "invoice_items"):
         return await _handle_invoice_flow(update, context, text, flow)
+    if flow == "payment_reference":
+        return await _handle_payment_flow(update, context, reference=text)
 
     # دکمه‌های منوی اصلی
     if text == texts.BTN_HELP:
@@ -119,6 +125,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data["flow"] = "invoice_customer"
         context.user_data["invoice"] = {"items": []}
         return await update.message.reply_text(texts.INVOICE_ASK_CUSTOMER)
+    if text == texts.BTN_SUBSCRIPTION:
+        return await _show_subscription(update, context)
     if text == texts.BTN_CANCEL:
         return await cancel(update, context)
 
@@ -148,6 +156,12 @@ async def _log_transaction(update, context, text: str) -> None:
     uid = update.effective_user.id
     with _session(context) as session:
         tx_service.get_or_create_user(session, uid)
+        sub_service.get_or_create_subscription(session, uid)
+        if not sub_service.is_active(session, uid):
+            session.commit()
+            return await update.message.reply_text(
+                texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
+            )
         tx_service.add_transaction(
             session,
             uid,
@@ -291,8 +305,18 @@ async def _finalize_invoice(update, context, data: dict) -> None:
         return await update.message.reply_text(
             texts.INVOICE_NO_ITEMS, reply_markup=keyboards.main_menu()
         )
-    await update.message.reply_text(texts.INVOICE_GENERATING)
     uid = update.effective_user.id
+    with _session(context) as session:
+        tx_service.get_or_create_user(session, uid)
+        sub_service.get_or_create_subscription(session, uid)
+        active = sub_service.is_active(session, uid)
+        session.commit()
+    if not active:
+        _clear_flow(context)
+        return await update.message.reply_text(
+            texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
+        )
+    await update.message.reply_text(texts.INVOICE_GENERATING)
     out_path = None
     try:
         with _session(context) as session:
@@ -326,10 +350,192 @@ async def _finalize_invoice(update, context, data: dict) -> None:
                 pass
 
 
+# --- اشتراک و پرداخت ----------------------------------------------------------
+
+
+async def _show_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    with _session(context) as session:
+        tx_service.get_or_create_user(session, uid)
+        sub_service.get_or_create_subscription(session, uid)
+        status = sub_service.status_text(session, uid)
+        session.commit()
+    await update.message.reply_text(
+        f"{status}\n\n{texts.SUB_CHOOSE_PLAN}",
+        parse_mode="HTML",
+        reply_markup=keyboards.subscription_plans(),
+    )
+
+
+async def on_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """انتخاب پلن → نمایش دستور پرداخت کارت‌به‌کارت."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":")  # sub:buy:<plan>
+    if len(parts) < 3 or parts[1] != "buy":
+        return
+    plan_key = parts[2]
+    plan = plans.get_plan(plan_key)
+    if plan is None:
+        return await query.edit_message_text(texts.GENERIC_ERROR)
+    settings = context.application.bot_data["settings"]
+    if not settings.card_number:
+        return await query.edit_message_text(texts.PAYMENT_NO_CARD)
+    context.user_data["flow"] = "payment_reference"
+    context.user_data["payment"] = {"plan": plan_key}
+    await query.edit_message_text(
+        texts.PAYMENT_INSTRUCTIONS.format(
+            plan=plan["label"],
+            amount=money.format_amount(plan["price"]),
+            card=settings.card_number,
+            holder=settings.card_holder or "—",
+        ),
+        parse_mode="HTML",
+    )
+
+
+async def _handle_payment_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    reference: str = "",
+    receipt_file_id: str | None = None,
+) -> None:
+    data = context.user_data.get("payment") or {}
+    plan_key = data.get("plan")
+    plan = plans.get_plan(plan_key) if plan_key else None
+    if plan is None:
+        _clear_flow(context)
+        return await update.message.reply_text(
+            texts.GENERIC_ERROR, reply_markup=keyboards.main_menu()
+        )
+    uid = update.effective_user.id
+    with _session(context) as session:
+        tx_service.get_or_create_user(session, uid)
+        payment = sub_service.create_payment(
+            session,
+            uid,
+            plan_key,
+            plan["price"],
+            reference=reference or "",
+            receipt_file_id=receipt_file_id,
+        )
+        session.commit()
+        pid = payment.id
+    _clear_flow(context)
+    await update.message.reply_text(
+        texts.PAYMENT_SUBMITTED, reply_markup=keyboards.main_menu()
+    )
+    await _notify_admins_payment(context, uid, plan, pid, reference, receipt_file_id)
+
+
+async def _notify_admins_payment(
+    context: ContextTypes.DEFAULT_TYPE,
+    uid: int,
+    plan: dict,
+    pid: int,
+    reference: str,
+    receipt_file_id: str | None,
+) -> None:
+    settings = context.application.bot_data["settings"]
+    caption = texts.ADMIN_NEW_PAYMENT.format(
+        user_id=uid,
+        plan=plan["label"],
+        amount=money.format_amount(plan["price"]),
+        reference=reference or "—",
+    )
+    markup = keyboards.payment_review(pid)
+    for admin_id in settings.admin_ids:
+        try:
+            if receipt_file_id:
+                await context.bot.send_photo(
+                    chat_id=admin_id, photo=receipt_file_id, caption=caption,
+                    parse_mode="HTML", reply_markup=markup,
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=admin_id, text=caption, parse_mode="HTML",
+                    reply_markup=markup,
+                )
+        except Exception:
+            continue
+
+
+async def on_payment_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """تأیید/رد پرداخت توسط مدیر."""
+    query = update.callback_query
+    parts = query.data.split(":")  # pay:approve|reject:<id>
+    action = parts[1] if len(parts) > 1 else ""
+    try:
+        pid = int(parts[2])
+    except (IndexError, ValueError):
+        return await query.answer()
+    admin_id = update.effective_user.id
+    settings = context.application.bot_data["settings"]
+    if admin_id not in settings.admin_ids:
+        return await query.answer(texts.ADMIN_NOT_ALLOWED, show_alert=True)
+    await query.answer()
+
+    payment = None
+    approved = False
+    target_uid = None
+    status_text = ""
+    with _session(context) as session:
+        if action == "approve":
+            payment = sub_service.approve_payment(session, pid, admin_id)
+            if payment is not None:
+                approved = True
+                target_uid = payment.user_id
+                status_text = sub_service.status_text(session, payment.user_id)
+        else:
+            payment = sub_service.reject_payment(session, pid, admin_id)
+            if payment is not None:
+                target_uid = payment.user_id
+        session.commit()
+
+    if payment is None:  # قبلاً بررسی شده
+        return await _safe_edit(query, texts.ADMIN_PAYMENT_GONE)
+
+    result = "تأیید شد ✅" if approved else "رد شد ❌"
+    await _safe_edit(query, texts.ADMIN_PAYMENT_DONE.format(pid=pid, result=result))
+
+    if target_uid is not None:
+        try:
+            if approved:
+                await context.bot.send_message(
+                    chat_id=target_uid,
+                    text=texts.PAYMENT_APPROVED_USER.format(status=status_text),
+                    parse_mode="HTML",
+                    reply_markup=keyboards.main_menu(),
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=target_uid, text=texts.PAYMENT_REJECTED_USER
+                )
+        except Exception:
+            pass
+
+
+async def _safe_edit(query, text: str) -> None:
+    """ویرایش متن یا کپشن پیام مدیر (پیام می‌تواند عکس یا متن باشد)."""
+    try:
+        await query.edit_message_text(text)
+    except Exception:
+        try:
+            await query.edit_message_caption(caption=text)
+        except Exception:
+            pass
+
+
 # --- عکس رسید (OCR) -----------------------------------------------------------
 
 
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # اگر کاربر در جریان پرداخت است، عکس را به‌عنوان رسید در نظر بگیر
+    if context.user_data.get("flow") == "payment_reference":
+        file_id = update.message.photo[-1].file_id
+        return await _handle_payment_flow(
+            update, context, reference="(عکس رسید)", receipt_file_id=file_id
+        )
     provider = context.application.bot_data.get("ocr")
     photo = update.message.photo[-1]
     tg_file = await photo.get_file()
@@ -375,5 +581,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
+    application.add_handler(CallbackQueryHandler(on_subscription, pattern=r"^sub:"))
+    application.add_handler(CallbackQueryHandler(on_payment_review, pattern=r"^pay:"))
     application.add_handler(MessageHandler(filters.PHOTO, on_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

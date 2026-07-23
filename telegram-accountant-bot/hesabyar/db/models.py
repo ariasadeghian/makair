@@ -151,6 +151,59 @@ class Invoice(Base):
         return sum(item.line_total for item in self.items)
 
 
+class PaymentStatus:
+    """وضعیت پرداخت اشتراک."""
+
+    PENDING = "pending"  # در انتظار تأیید مدیر
+    APPROVED = "approved"  # تأییدشده
+    REJECTED = "rejected"  # ردشده
+
+    ALL = (PENDING, APPROVED, REJECTED)
+
+
+class Subscription(Base):
+    """اشتراک هر کاربر (هر کاربر یک ردیف)."""
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    plan: Mapped[str] = mapped_column(String(20), default="trial")
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Payment(Base):
+    """درخواست پرداخت اشتراک (کارت‌به‌کارت)."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    plan: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[int] = mapped_column(BigInteger)  # تومان
+    status: Mapped[str] = mapped_column(String(12), default=PaymentStatus.PENDING)
+    #: کد پیگیری یا توضیح واریز که کاربر می‌فرستد
+    reference: Mapped[str] = mapped_column(String(200), default="")
+    #: شناسه‌ی عکس رسید در تلگرام (در صورت ارسال عکس)
+    receipt_file_id: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[int | None] = mapped_column(BigInteger)
+
+
 class InvoiceItem(Base):
     __tablename__ = "invoice_items"
 
