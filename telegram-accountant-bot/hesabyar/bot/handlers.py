@@ -26,6 +26,7 @@ from .. import plans
 from ..core import jalali, money, nlp
 from ..db.models import Direction, Kind, PaymentStatus
 from ..pdf.invoice_pdf import render_invoice_pdf
+from ..services import backup as backup_service
 from ..services import export as export_service
 from ..services import gateway as gateway_service
 from ..services import invoices as invoice_service
@@ -156,6 +157,30 @@ async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 document=fh,
                 filename="hesabyar-transactions.xlsx",
                 caption=texts.EXPORT_CAPTION,
+                reply_markup=keyboards.main_menu(),
+            )
+    finally:
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+
+async def backup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /backup — پشتیبان کامل داده‌های کاربر به‌صورت اکسل چندشیتی."""
+    uid = update.effective_user.id
+    await update.message.reply_text(texts.BACKUP_GENERATING)
+    out_path = os.path.join(tempfile.gettempdir(), f"hesabyar_backup_{uid}.xlsx")
+    try:
+        with _session(context) as session:
+            user = tx_service.get_or_create_user(session, uid)
+            backup_service.export_full_user_xlsx(session, uid, out_path, business=user)
+        with open(out_path, "rb") as fh:
+            await update.message.reply_document(
+                document=fh,
+                filename="hesabyar-backup.xlsx",
+                caption=texts.BACKUP_CAPTION,
                 reply_markup=keyboards.main_menu(),
             )
     finally:
@@ -815,6 +840,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("undo", undo_cmd))
     application.add_handler(CommandHandler("export", export_cmd))
     application.add_handler(CommandHandler("search", search_cmd))
+    application.add_handler(CommandHandler("backup", backup_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
     application.add_handler(CallbackQueryHandler(on_subscription, pattern=r"^sub:"))

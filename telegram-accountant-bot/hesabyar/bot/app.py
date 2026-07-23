@@ -39,6 +39,15 @@ def build_application(settings: Settings) -> Application:
             reminders.send_due_reminders, time=run_at, name="due_reminders"
         )
         logger.info("یادآوری روزانه روی ساعت %s تنظیم شد.", run_at)
+
+        if settings.backup_weekly:
+            job_queue.run_repeating(
+                reminders.weekly_backup,
+                interval=dt.timedelta(days=7),
+                first=dt.timedelta(hours=1),
+                name="weekly_backup",
+            )
+            logger.info("پشتیبان‌گیری هفتگی دیتابیس فعال شد.")
     else:
         logger.warning(
             "JobQueue در دسترس نیست؛ یادآوری سررسید غیرفعال است. "

@@ -81,6 +81,9 @@ class Settings:
     seller_tin: str = ""  # شماره اقتصادی/شناسه‌ی فروشنده
     economic_code: str = ""
     vat_rate: float = 0.10  # نرخ مالیات بر ارزش افزوده
+    # پشتیبان‌گیری
+    backup_dir: str = ""  # پوشه‌ی نگه‌داری پشتیبان دیتابیس (خالی = کنار دیتابیس)
+    backup_weekly: bool = True  # پشتیبان‌گیری هفتگی خودکار دیتابیس
 
     @property
     def ocr_enabled(self) -> bool:
@@ -127,4 +130,6 @@ def load_settings(require_token: bool = True) -> Settings:
         seller_tin=_get("SELLER_TIN", ""),
         economic_code=_get("ECONOMIC_CODE", ""),
         vat_rate=_get_float("VAT_RATE", 0.10),
+        backup_dir=_get("BACKUP_DIR", ""),
+        backup_weekly=_get_bool("BACKUP_WEEKLY", True),
     )

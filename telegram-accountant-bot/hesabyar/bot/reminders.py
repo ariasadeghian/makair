@@ -7,7 +7,9 @@ from telegram.ext import ContextTypes
 
 from ..core import jalali, money
 from ..db.models import Direction
+from ..services import backup as backup_service
 from ..services import ledger as ledger_service
+from . import texts
 
 
 async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -45,3 +47,22 @@ async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 continue
     finally:
         session.close()
+
+
+async def weekly_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """پشتیبان هفتگی دیتابیس (SQLite) و اطلاع به مدیران."""
+    settings = context.application.bot_data["settings"]
+    path = backup_service.backup_sqlite(
+        settings.database_url, settings.backup_dir or None
+    )
+    if not path:
+        return
+    for admin_id in settings.admin_ids:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=texts.ADMIN_BACKUP_DONE.format(path=path),
+                parse_mode="HTML",
+            )
+        except Exception:
+            continue
