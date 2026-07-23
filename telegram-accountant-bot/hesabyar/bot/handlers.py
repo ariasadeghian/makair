@@ -30,6 +30,7 @@ from ..services import backup as backup_service
 from ..services import dashboard as dashboard_service
 from ..services import export as export_service
 from ..services import gateway as gateway_service
+from ..services import ingest as ingest_service
 from ..services import invoices as invoice_service
 from ..services import ledger as ledger_service
 from ..services import moadian as moadian_service
@@ -289,6 +290,11 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await _show_subscription(update, context)
     if text == texts.BTN_CANCEL:
         return await cancel(update, context)
+
+    # لینک فاکتور؟ (وقتی پیام لینک دارد و مبلغی داخلش نیست)
+    url = ingest_service.find_url(text)
+    if url and money.parse_amount(text) is None:
+        return await _ingest_from_url(update, context, url)
 
     # در غیر این صورت: ثبت تراکنش از روی متن
     await _log_transaction(update, context, text)
@@ -814,20 +820,20 @@ async def on_moadian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _safe_edit(query, texts.MOADIAN_OK.format(ref=ref))
 
 
-# --- عکس رسید (OCR) -----------------------------------------------------------
+# --- خواندن فاکتور: عکس، فایل، لینک ------------------------------------------
 
 
-async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # اگر کاربر در جریان پرداخت است، عکس را به‌عنوان رسید در نظر بگیر
-    if context.user_data.get("flow") == "payment_reference":
-        file_id = update.message.photo[-1].file_id
-        return await _handle_payment_flow(
-            update, context, reference="(عکس رسید)", receipt_file_id=file_id
-        )
+async def _process_receipt_image(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    image_bytes: bytes,
+    source_label: str,
+) -> None:
+    """بایت‌های تصویر را OCR می‌کند و به‌عنوان تراکنش ثبت می‌کند."""
     provider = context.application.bot_data.get("ocr")
-    photo = update.message.photo[-1]
-    tg_file = await photo.get_file()
-    image_bytes = bytes(await tg_file.download_as_bytearray())
+    if provider is None or isinstance(provider, ocr_service.NullOcrProvider):
+        return await update.message.reply_text(texts.OCR_DISABLED)
+    await update.message.reply_text(texts.OCR_READING)
     try:
         extracted = await provider.extract_text(image_bytes)
     except ocr_service.OcrUnavailable:
@@ -838,6 +844,7 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parsed = ocr_service.parse_receipt_text(extracted, base=jalali.now())
     if parsed is None:
         return await update.message.reply_text(texts.OCR_FAILED)
+
     uid = update.effective_user.id
     with _session(context) as session:
         tx_service.get_or_create_user(session, uid)
@@ -848,23 +855,70 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
             )
         tx = tx_service.add_transaction(
-            session,
-            uid,
-            kind=parsed.kind,
-            amount=parsed.amount,
-            category=parsed.category,
-            description=parsed.description,
+            session, uid, kind=parsed.kind, amount=parsed.amount,
+            category=parsed.category, description=parsed.description,
             occurred_at=parsed.occurred_at,
         )
         session.commit()
         tx_id = tx.id
     msg = (
-        f"📸 از روی عکس ثبت شد:\n"
+        f"{source_label} ثبت شد:\n"
         f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} — "
         f"{money.format_amount(parsed.amount)}\n"
         f"دسته: {parsed.category}"
     )
     await update.message.reply_text(msg, reply_markup=keyboards.undo_transaction(tx_id))
+
+
+async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """عکس فاکتور/رسید (دوربین یا گالری)."""
+    if context.user_data.get("flow") == "payment_reference":
+        file_id = update.message.photo[-1].file_id
+        return await _handle_payment_flow(
+            update, context, reference="(عکس رسید)", receipt_file_id=file_id
+        )
+    tg_file = await update.message.photo[-1].get_file()
+    image_bytes = bytes(await tg_file.download_as_bytearray())
+    await _process_receipt_image(update, context, image_bytes, texts.INGEST_SOURCE_PHOTO)
+
+
+async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """فایل فاکتور: عکس یا PDF (به‌صورت فایل یا فوروارد)."""
+    doc = update.message.document
+    if doc is None:
+        return
+    mime = (doc.mime_type or "").lower()
+    name = (doc.file_name or "").lower()
+    is_pdf = "pdf" in mime or name.endswith(".pdf")
+    is_image = mime.startswith("image/")
+    if not (is_pdf or is_image):
+        return await update.message.reply_text(texts.INGEST_UNSUPPORTED)
+    if context.user_data.get("flow") == "payment_reference":
+        return await _handle_payment_flow(
+            update, context, reference="(رسید فایل)", receipt_file_id=doc.file_id
+        )
+    tg_file = await doc.get_file()
+    raw = bytes(await tg_file.download_as_bytearray())
+    try:
+        image_bytes = ingest_service.prepare_image(raw, mime)
+    except ingest_service.IngestError as exc:
+        return await update.message.reply_text(str(exc))
+    await _process_receipt_image(update, context, image_bytes, texts.INGEST_SOURCE_FILE)
+
+
+async def _ingest_from_url(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
+) -> None:
+    """خواندن فاکتور از روی یک لینک."""
+    provider = context.application.bot_data.get("ocr")
+    if provider is None or isinstance(provider, ocr_service.NullOcrProvider):
+        return await update.message.reply_text(texts.OCR_DISABLED)
+    try:
+        raw, content_type = await ingest_service.fetch_bytes(url)
+        image_bytes = ingest_service.prepare_image(raw, content_type)
+    except ingest_service.IngestError as exc:
+        return await update.message.reply_text(f"{texts.INGEST_LINK_FAILED}\n{exc}")
+    await _process_receipt_image(update, context, image_bytes, texts.INGEST_SOURCE_LINK)
 
 
 # --- ثبت هندلرها --------------------------------------------------------------
@@ -888,4 +942,5 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_undo, pattern=r"^tx:undo:"))
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
     application.add_handler(MessageHandler(filters.PHOTO, on_photo))
+    application.add_handler(MessageHandler(filters.Document.ALL, on_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
