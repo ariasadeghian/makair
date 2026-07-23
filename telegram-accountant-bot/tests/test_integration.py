@@ -109,6 +109,43 @@ def test_invoice_flow(session, tmp_path):
     assert invoice_service.get_invoice(session, invoice.id, 999) is None
 
 
+def test_moadian_payload_from_db_invoice(session):
+    """مثل on_moadian: ساخت payload از یک فاکتور واقعی دیتابیس."""
+    from hesabyar.services import moadian as moadian_service
+
+    user = tx_service.get_or_create_user(session, UID)
+    user.business_name = "فروشگاه تست"
+    session.commit()
+    invoice = invoice_service.create_invoice(
+        session, UID, customer_name="مشتری",
+        items=[{"title": "کالا", "quantity": 2, "unit_price": 100_000}],
+        issue_date=jalali.now().date(),
+    )
+    session.commit()
+    payload = moadian_service.build_invoice_payload(
+        invoice, user, economic_code="123", seller_tin="456", vat_rate=0.10
+    )
+    assert payload["header"]["inno"] == invoice.number
+    assert len(payload["body"]) == 1
+    assert payload["totals"]["subtotal"] == 200_000
+    assert payload["totals"]["vat"] == 20_000
+    assert payload["totals"]["total"] == 220_000
+
+
+def test_deleted_transaction_attributes_readable(session):
+    """الگوی undo: پس از حذف و commit، صفت‌های تراکنش باید خوانا بمانند."""
+    tx_service.get_or_create_user(session, UID)
+    t = tx_service.add_transaction(
+        session, UID, kind=Kind.EXPENSE, amount=50_000,
+        category="متفرقه", description="x", occurred_at=jalali.now(),
+    )
+    session.commit()
+    deleted = tx_service.delete_transaction(session, UID, t.id)
+    assert deleted is not None
+    label = f"{deleted.kind} {deleted.amount} {deleted.category}"
+    assert "50000" in label
+
+
 def test_ocr_provider_selection():
     """مثل build_application و on_photo."""
     off = Settings(bot_token="x")

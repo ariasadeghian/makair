@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import html
 import os
 import re
 import tempfile
@@ -23,10 +24,13 @@ from telegram.ext import (
 
 from .. import plans
 from ..core import jalali, money, nlp
-from ..db.models import Direction, Kind
+from ..db.models import Direction, Kind, PaymentStatus
 from ..pdf.invoice_pdf import render_invoice_pdf
+from ..services import export as export_service
+from ..services import gateway as gateway_service
 from ..services import invoices as invoice_service
 from ..services import ledger as ledger_service
+from ..services import moadian as moadian_service
 from ..services import ocr as ocr_service
 from ..services import reports as report_service
 from ..services import subscription as sub_service
@@ -91,6 +95,100 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _clear_flow(context)
     await update.message.reply_text(texts.CANCELLED, reply_markup=keyboards.main_menu())
+
+
+def _tx_summary(tx) -> str:
+    return f"{_kind_label(tx.kind)} {money.format_amount(tx.amount)} ({tx.category})"
+
+
+async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /undo — حذف آخرین تراکنش ثبت‌شده."""
+    uid = update.effective_user.id
+    with _session(context) as session:
+        tx = tx_service.delete_last(session, uid)
+        summary = _tx_summary(tx) if tx else None
+    if summary:
+        await update.message.reply_text(
+            texts.UNDO_DONE.format(summary=summary), reply_markup=keyboards.main_menu()
+        )
+    else:
+        await update.message.reply_text(
+            texts.UNDO_NONE, reply_markup=keyboards.main_menu()
+        )
+
+
+async def on_undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌ی «لغو این ثبت» زیر پیام تأیید تراکنش."""
+    query = update.callback_query
+    await query.answer()
+    uid = update.effective_user.id
+    try:
+        tx_id = int(query.data.split(":")[2])
+    except (IndexError, ValueError):
+        return
+    with _session(context) as session:
+        tx = tx_service.delete_transaction(session, uid, tx_id)
+        summary = _tx_summary(tx) if tx else None
+    text = texts.UNDO_DONE.format(summary=summary) if summary else texts.UNDO_NONE
+    await _safe_edit(query, text)
+
+
+async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /export — خروجی اکسل تراکنش‌های ماه جاری."""
+    uid = update.effective_user.id
+    start, end = jalali.month_bounds(jalali.now())
+    out_path = os.path.join(tempfile.gettempdir(), f"hesabyar_export_{uid}.xlsx")
+    made = False
+    with _session(context) as session:
+        user = tx_service.get_or_create_user(session, uid)
+        if tx_service.list_transactions(session, uid, start, end):
+            export_service.export_transactions_xlsx(
+                session, uid, start, end, out_path, business=user
+            )
+            made = True
+    if not made:
+        return await update.message.reply_text(
+            texts.EXPORT_EMPTY, reply_markup=keyboards.main_menu()
+        )
+    try:
+        with open(out_path, "rb") as fh:
+            await update.message.reply_document(
+                document=fh,
+                filename="hesabyar-transactions.xlsx",
+                caption=texts.EXPORT_CAPTION,
+                reply_markup=keyboards.main_menu(),
+            )
+    finally:
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+
+async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /search <کلمه> — جست‌وجو در تراکنش‌ها."""
+    query_text = " ".join(context.args).strip() if context.args else ""
+    if not query_text:
+        return await update.message.reply_text(texts.SEARCH_USAGE, parse_mode="HTML")
+    uid = update.effective_user.id
+    lines = [texts.SEARCH_HEADER]
+    with _session(context) as session:
+        tx_service.get_or_create_user(session, uid)
+        results = tx_service.search_transactions(session, uid, query_text)
+        for t in results:
+            lines.append(
+                f"{_kind_icon(t.kind)} {money.format_amount(t.amount)} — "
+                f"{html.escape(t.category)} — {jalali.format_date(t.occurred_at)}\n"
+                f"<i>{html.escape(t.description or '')}</i>"
+            )
+    if not results:
+        return await update.message.reply_text(
+            texts.SEARCH_EMPTY, reply_markup=keyboards.main_menu()
+        )
+    await update.message.reply_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=keyboards.main_menu()
+    )
 
 
 # --- متن آزاد ----------------------------------------------------------------
@@ -162,7 +260,7 @@ async def _log_transaction(update, context, text: str) -> None:
             return await update.message.reply_text(
                 texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
             )
-        tx_service.add_transaction(
+        tx = tx_service.add_transaction(
             session,
             uid,
             kind=parsed.kind,
@@ -172,13 +270,14 @@ async def _log_transaction(update, context, text: str) -> None:
             occurred_at=parsed.occurred_at,
         )
         session.commit()
+        tx_id = tx.id
     msg = (
         f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} ثبت شد\n"
         f"مبلغ: {money.format_amount(parsed.amount)}\n"
         f"دسته: {parsed.category}\n"
         f"تاریخ: {jalali.format_date(parsed.occurred_at)}"
     )
-    await update.message.reply_text(msg, reply_markup=keyboards.main_menu())
+    await update.message.reply_text(msg, reply_markup=keyboards.undo_transaction(tx_id))
 
 
 # --- گزارش (callback) ---------------------------------------------------------
@@ -330,6 +429,7 @@ async def _finalize_invoice(update, context, data: dict) -> None:
             )
             session.commit()
             number = invoice.number
+            invoice_id = invoice.id
             out_path = os.path.join(
                 tempfile.gettempdir(), f"invoice_{invoice.id}.pdf"
             )
@@ -339,7 +439,7 @@ async def _finalize_invoice(update, context, data: dict) -> None:
                 document=fh,
                 filename=f"factor-{number}.pdf",
                 caption=texts.INVOICE_DONE.format(number=number),
-                reply_markup=keyboards.main_menu(),
+                reply_markup=keyboards.moadian_send(invoice_id),
             )
     finally:
         _clear_flow(context)
@@ -379,6 +479,11 @@ async def on_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if plan is None:
         return await query.edit_message_text(texts.GENERIC_ERROR)
     settings = context.application.bot_data["settings"]
+
+    # روش پرداخت: درگاه آنلاین یا کارت‌به‌کارت
+    if settings.payment_method == "zarinpal":
+        return await _start_zarinpal_payment(update, context, plan_key, plan)
+
     if not settings.card_number:
         return await query.edit_message_text(texts.PAYMENT_NO_CARD)
     context.user_data["flow"] = "payment_reference"
@@ -515,15 +620,136 @@ async def on_payment_review(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             pass
 
 
-async def _safe_edit(query, text: str) -> None:
-    """ویرایش متن یا کپشن پیام مدیر (پیام می‌تواند عکس یا متن باشد)."""
+async def _safe_edit(query, text: str, reply_markup=None) -> None:
+    """ویرایش متن یا کپشن پیام (پیام می‌تواند عکس یا متن باشد)."""
     try:
-        await query.edit_message_text(text)
+        await query.edit_message_text(text, reply_markup=reply_markup)
     except Exception:
         try:
-            await query.edit_message_caption(caption=text)
+            await query.edit_message_caption(caption=text, reply_markup=reply_markup)
         except Exception:
             pass
+
+
+# --- پرداخت آنلاین (زرین‌پال) -------------------------------------------------
+
+
+async def _start_zarinpal_payment(update, context, plan_key: str, plan: dict) -> None:
+    query = update.callback_query
+    uid = update.effective_user.id
+    settings = context.application.bot_data["settings"]
+    gateway = gateway_service.get_gateway(settings)
+    callback_url = settings.payment_callback_url or "https://t.me"
+    try:
+        res = await gateway.request_payment(
+            plan["price"],
+            description=f"اشتراک {plan['label']} حسابیار",
+            callback_url=callback_url,
+        )
+    except gateway_service.GatewayError:
+        return await _safe_edit(query, texts.GATEWAY_ERROR)
+
+    with _session(context) as session:
+        tx_service.get_or_create_user(session, uid)
+        payment = sub_service.create_payment(
+            session, uid, plan_key, plan["price"], reference=res["authority"]
+        )
+        session.commit()
+        pid = payment.id
+    _clear_flow(context)
+    await _safe_edit(
+        query,
+        texts.PAYMENT_ZARINPAL_LINK.format(
+            plan=plan["label"], amount=money.format_amount(plan["price"])
+        ),
+        reply_markup=keyboards.zarinpal_pay(res["pay_url"], pid),
+    )
+
+
+async def on_zarinpal_verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌ی «بررسی پرداخت» — راستی‌آزمایی تراکنش زرین‌پال."""
+    query = update.callback_query
+    await query.answer(texts.PAYMENT_VERIFYING)
+    try:
+        pid = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+    uid = update.effective_user.id
+    settings = context.application.bot_data["settings"]
+    gateway = gateway_service.get_gateway(settings)
+
+    with _session(context) as session:
+        payment = sub_service.get_payment(session, pid)
+        if payment is None or payment.user_id != uid:
+            return await _safe_edit(query, texts.GENERIC_ERROR)
+        if payment.status == PaymentStatus.APPROVED:
+            status_text = sub_service.status_text(session, uid)
+            return await _safe_edit(
+                query,
+                texts.PAYMENT_VERIFY_OK.format(
+                    ref=payment.reference or "—", status=status_text
+                ),
+            )
+        authority = payment.reference
+        amount = payment.amount
+
+    try:
+        result = await gateway.verify(authority, amount)
+    except gateway_service.GatewayError:
+        return await _safe_edit(query, texts.PAYMENT_VERIFY_FAIL)
+    if not result.get("ok"):
+        return await _safe_edit(query, texts.PAYMENT_VERIFY_FAIL)
+
+    ref_id = str(result.get("ref_id") or "—")
+    with _session(context) as session:
+        approved = sub_service.approve_payment(session, pid, admin_id=0)
+        if approved is not None:
+            approved.reference = ref_id
+        status_text = sub_service.status_text(session, uid)
+        session.commit()
+    await _safe_edit(
+        query, texts.PAYMENT_VERIFY_OK.format(ref=ref_id, status=status_text)
+    )
+
+
+# --- مودیان -------------------------------------------------------------------
+
+
+async def on_moadian(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """ارسال فاکتور به سامانه‌ی مودیان (حالت واقعی یا آزمایشی)."""
+    query = update.callback_query
+    await query.answer(texts.MOADIAN_SENDING)
+    try:
+        invoice_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+    uid = update.effective_user.id
+    settings = context.application.bot_data["settings"]
+
+    with _session(context) as session:
+        user = tx_service.get_or_create_user(session, uid)
+        invoice = invoice_service.get_invoice(session, invoice_id, uid)
+        if invoice is None:
+            return await _safe_edit(query, texts.MOADIAN_FAILED)
+        payload = moadian_service.build_invoice_payload(
+            invoice,
+            user,
+            economic_code=settings.economic_code,
+            seller_tin=settings.seller_tin,
+            vat_rate=settings.vat_rate,
+        )
+
+    client = moadian_service.get_moadian_client(settings)
+    try:
+        result = await client.submit(payload)
+    except moadian_service.MoadianUnavailable:
+        return await _safe_edit(query, texts.MOADIAN_FAILED)
+
+    ref = result.get("reference") or result.get("ref") or "—"
+    if result.get("status") == "dry-run":
+        await _safe_edit(query, texts.MOADIAN_DRYRUN.format(ref=ref))
+    else:
+        await _safe_edit(query, texts.MOADIAN_OK.format(ref=ref))
 
 
 # --- عکس رسید (OCR) -----------------------------------------------------------
@@ -553,7 +779,13 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     with _session(context) as session:
         tx_service.get_or_create_user(session, uid)
-        tx_service.add_transaction(
+        sub_service.get_or_create_subscription(session, uid)
+        if not sub_service.is_active(session, uid):
+            session.commit()
+            return await update.message.reply_text(
+                texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
+            )
+        tx = tx_service.add_transaction(
             session,
             uid,
             kind=parsed.kind,
@@ -563,13 +795,14 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             occurred_at=parsed.occurred_at,
         )
         session.commit()
+        tx_id = tx.id
     msg = (
         f"📸 از روی عکس ثبت شد:\n"
         f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} — "
         f"{money.format_amount(parsed.amount)}\n"
         f"دسته: {parsed.category}"
     )
-    await update.message.reply_text(msg, reply_markup=keyboards.main_menu())
+    await update.message.reply_text(msg, reply_markup=keyboards.undo_transaction(tx_id))
 
 
 # --- ثبت هندلرها --------------------------------------------------------------
@@ -579,9 +812,15 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_cmd))
     application.add_handler(CommandHandler("cancel", cancel))
+    application.add_handler(CommandHandler("undo", undo_cmd))
+    application.add_handler(CommandHandler("export", export_cmd))
+    application.add_handler(CommandHandler("search", search_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
     application.add_handler(CallbackQueryHandler(on_subscription, pattern=r"^sub:"))
     application.add_handler(CallbackQueryHandler(on_payment_review, pattern=r"^pay:"))
+    application.add_handler(CallbackQueryHandler(on_zarinpal_verify, pattern=r"^zpv:"))
+    application.add_handler(CallbackQueryHandler(on_undo, pattern=r"^tx:undo:"))
+    application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
     application.add_handler(MessageHandler(filters.PHOTO, on_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

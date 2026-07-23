@@ -7,3 +7,4 @@ python-bidi>=0.4
 python-dotenv>=1.0
 httpx>=0.27
 pytest>=8.0
+openpyxl>=3.1

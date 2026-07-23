@@ -45,6 +45,30 @@ def payment_review(payment_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def undo_transaction(transaction_id: int) -> InlineKeyboardMarkup:
+    """دکمه‌ی لغو همین ثبت، زیر پیام تأیید تراکنش."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(texts.BTN_UNDO_TX, callback_data=f"tx:undo:{transaction_id}")]]
+    )
+
+
+def zarinpal_pay(pay_url: str, payment_id: int) -> InlineKeyboardMarkup:
+    """دکمه‌ی پرداخت آنلاین و بررسی پرداخت."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(texts.BTN_PAY_NOW, url=pay_url)],
+            [InlineKeyboardButton(texts.BTN_PAY_VERIFY, callback_data=f"zpv:{payment_id}")],
+        ]
+    )
+
+
+def moadian_send(invoice_id: int) -> InlineKeyboardMarkup:
+    """دکمه‌ی ارسال فاکتور به سامانه‌ی مودیان."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(texts.BTN_MOADIAN_SEND, callback_data=f"moadian:{invoice_id}")]]
+    )
+
+
 def report_periods() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [

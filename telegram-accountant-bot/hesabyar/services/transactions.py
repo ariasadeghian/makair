@@ -150,3 +150,36 @@ def delete_last(session: Session, user_id: int) -> Transaction | None:
     session.delete(tx)
     session.commit()
     return tx
+
+
+def delete_transaction(
+    session: Session, user_id: int, transaction_id: int
+) -> Transaction | None:
+    """یک تراکنش مشخص را حذف می‌کند (فقط اگر متعلق به همین کاربر باشد)."""
+    tx = session.get(Transaction, transaction_id)
+    if tx is None or tx.user_id != user_id:
+        return None
+    session.delete(tx)
+    session.commit()
+    return tx
+
+
+def search_transactions(
+    session: Session, user_id: int, query: str, limit: int = 15
+) -> list[Transaction]:
+    """جست‌وجوی تراکنش‌ها بر اساس شرح یا دسته (شامل عبارت).
+
+    نتایج جدیدترین‌ها اول و حداکثر ``limit`` مورد.
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+    like = f"%{q}%"
+    stmt = (
+        select(Transaction)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.description.like(like) | Transaction.category.like(like))
+        .order_by(Transaction.occurred_at.desc(), Transaction.id.desc())
+        .limit(limit)
+    )
+    return list(session.execute(stmt).scalars().all())
