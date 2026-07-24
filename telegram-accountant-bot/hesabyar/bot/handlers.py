@@ -24,7 +24,7 @@ from telegram.ext import (
 
 from .. import plans
 from ..core import categories, group_nlp, jalali, money
-from ..db.models import Direction, GroupEventKind, Kind, PaymentStatus
+from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
 from ..pdf.invoice_pdf import render_invoice_image, render_invoice_pdf
 from ..services import backup as backup_service
 from ..services import dashboard as dashboard_service
@@ -394,6 +394,8 @@ async def _route_text(
         return await _handle_onboarding(update, context, text)
     if flow in ("ledger_party", "ledger_amount", "ledger_due"):
         return await _handle_ledger_flow(update, context, text, flow)
+    if flow == "statement_party":
+        return await _handle_statement(update, context, text)
     if flow in ("invoice_customer", "invoice_items", "inv_discount", "inv_shipping"):
         return await _handle_invoice_flow(update, context, text, flow)
     if flow in ("prod_name", "prod_price"):
@@ -472,12 +474,16 @@ async def _log_transaction(update, context, text: str) -> None:
         )
         session.commit()
         tx_id = tx.id
+        # آیا این اولین تراکنشِ کاربر است؟ (برای پیام تشویقیِ آن‌بوردینگ)
+        is_first = len(session.list("transactions", lambda t: t.user_id == uid)) == 1
     msg = (
         f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} ثبت شد\n"
         f"مبلغ: {money.format_amount(parsed.amount)}\n"
         f"دسته: {parsed.category}\n"
         f"تاریخ: {jalali.format_date(parsed.occurred_at)}"
     )
+    if is_first:
+        msg += texts.FIRST_TX_CELEBRATION
     await update.message.reply_text(msg, reply_markup=keyboards.undo_transaction(tx_id))
 
 
@@ -513,6 +519,10 @@ async def on_ledger_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             report = ledger_service.build_ledger_report(session, uid)
         return await query.edit_message_text(report)
 
+    if action == "statement":
+        context.user_data["flow"] = "statement_party"
+        return await query.edit_message_text(texts.STATEMENT_ASK_NAME)
+
     if action == "add":
         direction = parts[2]
         context.user_data["flow"] = "ledger_party"
@@ -525,11 +535,31 @@ async def on_ledger_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(prompt)
 
 
+_CHEQUE_NO_RE = re.compile(r"[\d۰-۹]{6,}")
+
+
+def _detect_cheque(text: str) -> tuple:
+    """(instrument, cheque_no, cleaned_name) — اگر «چک» در نام باشد.
+
+    شماره‌ی چک (رشته‌ی ۶ رقم به بالا) و واژه‌ی «چک» از نام پاک می‌شوند.
+    """
+    if "چک" not in text:
+        return Instrument.CASH, "", text
+    match = _CHEQUE_NO_RE.search(money.to_english_digits(text))
+    cheque_no = match.group() if match else ""
+    name = _CHEQUE_NO_RE.sub(" ", text).replace("چک", " ")
+    name = " ".join(name.split()).strip()
+    return Instrument.CHEQUE, cheque_no, (name or "—")
+
+
 async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
     data = context.user_data.setdefault("ledger", {})
 
     if flow == "ledger_party":
-        data["party_name"] = text[:200]
+        instrument, cheque_no, name = _detect_cheque(text)
+        data["party_name"] = name[:200]
+        data["instrument"] = instrument
+        data["cheque_no"] = cheque_no
         context.user_data["flow"] = "ledger_amount"
         return await update.message.reply_text(texts.LEDGER_ASK_AMOUNT)
 
@@ -546,6 +576,7 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
         if "بدون" not in text:
             due_date = jalali.parse_relative_date(text, jalali.now())
         uid = update.effective_user.id
+        is_cheque = data.get("instrument") == Instrument.CHEQUE
         with _session(context) as session:
             await tx_service.get_or_create_user(session, uid)
             await ledger_service.add_entry(
@@ -556,6 +587,8 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
                 amount=data.get("amount", 0),
                 due_date=due_date,
                 description="",
+                instrument=data.get("instrument", Instrument.CASH),
+                cheque_no=data.get("cheque_no", ""),
             )
             session.commit()
             report = ledger_service.build_ledger_report(session, uid)
@@ -565,9 +598,33 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
             if due_date is not None
             else texts.LEDGER_SAVED
         )
+        if is_cheque:
+            saved = "🧾 چک — " + saved
         await update.message.reply_text(
             f"{saved}\n\n{report}", reply_markup=keyboards.main_menu()
         )
+
+
+async def _handle_statement(update, context, text: str) -> None:
+    """ساخت صورتحساب یک طرف‌حساب برای فوروارد کردن."""
+    name = text.strip()
+    _clear_flow(context)
+    if not name:
+        return await update.message.reply_text(texts.STATEMENT_ASK_NAME)
+    uid = update.effective_user.id
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        statement = ledger_service.build_party_statement(
+            session, uid, name, business=user
+        )
+    if statement is None:
+        return await update.message.reply_text(
+            texts.STATEMENT_EMPTY.format(name=name),
+            reply_markup=keyboards.main_menu(),
+        )
+    await update.message.reply_text(
+        statement, parse_mode="HTML", reply_markup=keyboards.main_menu()
+    )
 
 
 # --- فاکتور -------------------------------------------------------------------

@@ -5,7 +5,7 @@ import datetime as dt
 from typing import Optional
 
 from ..core import jalali, money
-from ..db.models import Direction, LedgerEntry
+from ..db.models import Direction, Instrument, LedgerEntry
 from ..db.store import Store
 from .transactions import get_or_create_user
 
@@ -23,11 +23,14 @@ async def add_entry(
     amount: int,
     due_date: Optional[dt.date] = None,
     description: str = "",
+    instrument: str = Instrument.CASH,
+    cheque_no: str = "",
 ) -> LedgerEntry:
     await get_or_create_user(store, user_id)
     entry = LedgerEntry(
         user_id=user_id, direction=direction, party_name=party_name,
         amount=int(amount), due_date=due_date, description=description,
+        instrument=instrument, cheque_no=cheque_no,
     )
     await store.add("ledger_entries", entry)
     return entry
@@ -122,5 +125,64 @@ def build_ledger_report(store: Store, user_id: int) -> str:
     for e in list_open(store, user_id)[:10]:
         label = "طلب از" if e.direction == Direction.RECEIVABLE else "بدهی به"
         due = f" (سررسید {jalali.format_date(e.due_date)})" if e.due_date else ""
-        lines.append(f"• {label} {e.party_name}: {money.format_amount(e.amount)}{due}")
+        tag = "🧾 چک " if e.is_cheque else ""
+        lines.append(
+            f"• {tag}{label} {e.party_name}: {money.format_amount(e.amount)}{due}"
+        )
+    return "\n".join(lines)
+
+
+def _norm_party(name: str) -> str:
+    """نرمال‌سازی نام برای تطبیق (حذف فاصله‌های اضافه و ZWNJ)."""
+    return " ".join((name or "").replace("‌", " ").split()).casefold()
+
+
+def entries_for_party(store: Store, user_id: int, party_name: str) -> list[LedgerEntry]:
+    """ردیف‌های بازِ یک طرف‌حساب (تطبیق نامِ نرمال‌شده و شاملِ زیررشته)."""
+    target = _norm_party(party_name)
+    if not target:
+        return []
+
+    def _match(e: LedgerEntry) -> bool:
+        if e.user_id != user_id or e.is_settled:
+            return False
+        name = _norm_party(e.party_name)
+        return target in name or name in target
+
+    return sorted(store.list("ledger_entries", _match), key=_due_key)
+
+
+def build_party_statement(
+    store: Store, user_id: int, party_name: str, business=None
+) -> Optional[str]:
+    """صورتحسابِ یک طرف‌حساب برای فوروارد کردن؛ ``None`` اگر ردیفی نباشد."""
+    entries = entries_for_party(store, user_id, party_name)
+    if not entries:
+        return None
+
+    receivable = sum(
+        int(e.amount) for e in entries if e.direction == Direction.RECEIVABLE
+    )
+    payable = sum(int(e.amount) for e in entries if e.direction == Direction.PAYABLE)
+    net = receivable - payable  # مثبت = او به ما بدهکار است
+
+    header = "📄 <b>صورتحساب</b>"
+    if business is not None and getattr(business, "business_name", None):
+        header += f" — {business.business_name}"
+    lines = [header, f"طرف‌حساب: <b>{party_name}</b>", ""]
+    for e in entries:
+        label = "طلب از" if e.direction == Direction.RECEIVABLE else "بدهی به"
+        due = f" (سررسید {jalali.format_date(e.due_date)})" if e.due_date else ""
+        tag = "🧾 چک " if e.is_cheque else ""
+        lines.append(
+            f"• {tag}{label} شما: {money.format_amount(e.amount)}{due}"
+        )
+    lines.append("")
+    if net > 0:
+        lines.append(f"💰 <b>مانده: {money.format_amount(net)} بدهکار</b>")
+    elif net < 0:
+        lines.append(f"💰 <b>مانده: {money.format_amount(-net)} بستانکار</b>")
+    else:
+        lines.append("💰 <b>مانده: تسویه</b>")
+    lines.append(f"\n🗓 {jalali.format_date(jalali.now())}")
     return "\n".join(lines)

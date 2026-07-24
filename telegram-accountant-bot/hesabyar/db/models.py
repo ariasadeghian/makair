@@ -26,6 +26,12 @@ class Direction:
     ALL = (RECEIVABLE, PAYABLE)
 
 
+class Instrument:
+    CASH = "cash"      # نقدی/معمولی
+    CHEQUE = "cheque"  # چک (سررسیدِ پاس‌شدن مهم است)
+    ALL = (CASH, CHEQUE)
+
+
 class PaymentStatus:
     PENDING = "pending"
     APPROVED = "approved"
@@ -165,6 +171,7 @@ class LedgerEntry:
     COLUMNS = (
         "id", "user_id", "direction", "party_name", "amount",
         "description", "due_date", "is_settled", "settled_at", "created_at",
+        "instrument", "cheque_no",
     )
 
     id: Optional[int] = None
@@ -177,12 +184,19 @@ class LedgerEntry:
     is_settled: bool = False
     settled_at: Optional[dt.datetime] = None
     created_at: Optional[dt.datetime] = None
+    instrument: str = Instrument.CASH
+    cheque_no: str = ""
+
+    @property
+    def is_cheque(self) -> bool:
+        return self.instrument == Instrument.CHEQUE
 
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.user_id), _s(self.direction), _s(self.party_name),
             _s(self.amount), _s(self.description), _s(self.due_date),
             _s(self.is_settled), _s(self.settled_at), _s(self.created_at),
+            _s(self.instrument), _s(self.cheque_no),
         ]
 
     @classmethod
@@ -198,6 +212,8 @@ class LedgerEntry:
             is_settled=_pbool(d.get("is_settled")),
             settled_at=_pdt(d.get("settled_at")),
             created_at=_pdt(d.get("created_at")),
+            instrument=_pstr(d.get("instrument")) or Instrument.CASH,
+            cheque_no=_pstr(d.get("cheque_no")),
         )
 
 

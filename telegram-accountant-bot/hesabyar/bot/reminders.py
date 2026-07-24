@@ -11,12 +11,14 @@ from ..core import jalali, money
 from ..db.models import Direction
 from ..services import backup as backup_service
 from ..services import ledger as ledger_service
+from ..services import reports as report_service
 from . import texts
 
 
 def _entry_line(entry) -> str:
     label = "طلب از" if entry.direction == Direction.RECEIVABLE else "بدهی به"
-    return f"• {label} {entry.party_name}: {money.format_amount(entry.amount)}"
+    tag = "🧾 چک " if getattr(entry, "is_cheque", False) else ""
+    return f"• {tag}{label} {entry.party_name}: {money.format_amount(entry.amount)}"
 
 
 def build_reminder_message(items: list, base) -> str:
@@ -107,3 +109,19 @@ async def weekly_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
                 os.remove(out_path)
             except OSError:
                 pass
+
+
+async def send_nightly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """خلاصه‌ی شبانه‌ی فعالیت را برای کاربرانی که «امروز» فعال بوده‌اند می‌فرستد."""
+    store = context.application.bot_data["store"]
+    now = jalali.now()
+    for user in store.list("users", lambda u: True):
+        digest = report_service.build_daily_digest(store, user.id, now)
+        if not digest:
+            continue
+        try:
+            await context.bot.send_message(
+                chat_id=user.id, text=digest, parse_mode="HTML"
+            )
+        except Exception:
+            continue

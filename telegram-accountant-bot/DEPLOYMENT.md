@@ -86,6 +86,7 @@ journalctl -u hesabyar -f
 | `DEFAULT_CURRENCY` | `تومان` | واحد پول |
 | `REMINDER_HOUR` / `REMINDER_MINUTE` | `9` / `0` | ساعت یادآوری روزانه‌ی سررسیدها (به وقت ایران) |
 | `REMINDER_LEAD_DAYS` | `2` | چند روز قبل از سررسید هم پیشاپیش یادآوری شود (۰ = فقط روزِ سررسید و معوق) |
+| `NIGHTLY_SUMMARY` / `NIGHTLY_SUMMARY_HOUR` | `true` / `21` | خلاصه‌ی خودکار شبانه فقط برای کاربرانِ فعالِ همان روز |
 | `ADMIN_IDS` | — | شناسه‌های عددی ادمین‌ها، با کاما. تأییدکننده‌ی پرداخت‌ها |
 | `PAYMENT_METHOD` | `card` | `card` (کارت‌به‌کارت) یا `zarinpal` (درگاه) |
 | `CARD_NUMBER` / `CARD_HOLDER` | — | برای روش کارت‌به‌کارت |
@@ -147,6 +148,8 @@ journalctl -u hesabyar -f
   معوق، سررسیدِ امروز، و نزدیک (`REMINDER_LEAD_DAYS` روز قبل).
 - **`weekly_backup`** — هفتگی؛ کل اسپردشیت به‌صورت اکسل (Drive API export) برای
   ادمین‌ها ارسال می‌شود.
+- **`nightly_summary`** — هر شب (ساعتِ `NIGHTLY_SUMMARY_HOUR`)؛ خلاصه‌ی فعالیتِ
+  امروز فقط برای کاربرانی که آن روز تراکنش داشته‌اند.
 
 ---
 

@@ -81,3 +81,29 @@ def build_report(
             lines.append(f"{rank_fa}. {category}: {money.format_amount(amount)}")
 
     return "\n".join(lines)
+
+
+def build_daily_digest(
+    store: Store, user_id: int, now: dt.datetime
+) -> str | None:
+    """خلاصه‌ی فعالیت مالیِ «امروز»؛ ``None`` اگر امروز چیزی ثبت نشده باشد.
+
+    برای پیام خودکار شبانه استفاده می‌شود؛ کاربرانِ بدون فعالیتِ امروز پیامی
+    نمی‌گیرند تا مزاحمت ایجاد نشود.
+    """
+    start, end = jalali.day_bounds(now)
+    data = transactions.summary(store, user_id, start, end)
+    if data["count"] == 0:
+        return None
+
+    balance = data["balance"]
+    balance_emoji = "🟢" if balance >= 0 else "🔴"
+    lines = [
+        f"🌙 <b>خلاصه‌ی امروز</b> ({jalali.format_date(start)})",
+        "",
+        f"💰 درآمد: {money.format_amount(data['income'])}",
+        f"💸 هزینه: {money.format_amount(data['expense'])}",
+        f"{balance_emoji} مانده‌ی امروز: {money.format_amount(balance)}",
+        f"🧾 {money.to_persian_digits(str(data['count']))} تراکنش",
+    ]
+    return "\n".join(lines)

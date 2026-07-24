@@ -104,6 +104,14 @@ def build_application(settings: Settings) -> Application:
                 first=dt.timedelta(hours=1),
                 name="weekly_backup",
             )
+        if settings.nightly_summary:
+            job_queue.run_daily(
+                reminders.send_nightly_summary,
+                time=dt.time(
+                    hour=settings.nightly_summary_hour, tzinfo=jalali.TEHRAN
+                ),
+                name="nightly_summary",
+            )
     else:
         logger.warning(
             "JobQueue در دسترس نیست؛ یادآوری و پشتیبان‌گیری غیرفعال‌اند."

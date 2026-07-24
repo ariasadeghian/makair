@@ -145,5 +145,6 @@ def ledger_menu() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(texts.BTN_ADD_PAYABLE, callback_data="ledger:add:payable"),
             ],
             [InlineKeyboardButton(texts.BTN_LEDGER_LIST, callback_data="ledger:list")],
+            [InlineKeyboardButton(texts.BTN_PARTY_STATEMENT, callback_data="ledger:statement")],
         ]
     )
