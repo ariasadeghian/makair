@@ -111,9 +111,9 @@ journalctl -u hesabyar -f
 - **آماده‌سازی (یک‌بار):** پروژه‌ی Google Cloud با Sheets API + Drive API فعال؛
   یک Service Account با کلید JSON؛ یک اسپردشیت خالی که با ایمیل سرویس‌اکانت
   به‌عنوان **Editor** شیر شده باشد. `GOOGLE_SHEET_ID` را از URL آن بردارید.
-- **بدون دیتابیس محلی:** ۸ تب (users, transactions, ledger_entries, invoices,
-  invoice_items, subscriptions, payments, products) خودکار در اولین اجرا ساخته
-  می‌شوند.
+- **بدون دیتابیس محلی:** ۹ تب (users, transactions, ledger_entries, invoices,
+  invoice_items, subscriptions, payments, products, group_events) خودکار در
+  اولین اجرا ساخته می‌شوند.
 - **در حافظه + نوشتن دسته‌ای:** کل داده هنگام بالا آمدن خوانده می‌شود؛ خواندن‌ها
   از حافظه (سریع، بدون Rate Limit) و نوشتن‌ها هر ۵ ثانیه به‌صورت دسته‌ای روی
   شیت می‌روند. عملیات پول‌محور (تأیید پرداخت/صدور فاکتور) بلافاصله flush می‌شوند.
@@ -160,6 +160,9 @@ journalctl -u hesabyar -f
   فایل‌های موقت پس از ارسال حذف می‌شوند.
 - **تک‌فرایند:** با long polling فقط **یک** نمونه‌ی بات باید هم‌زمان اجرا شود
   (دو نمونه با یک توکن → تداخل getUpdates).
+- **حالت گروه:** برای استفاده در گروه‌ها، در BotFather با `/setprivacy → Disable`
+  حریمِ گروهِ بات را خاموش کنید تا بات همه‌ی پیام‌ها را ببیند و رویدادهای مالی را
+  تشخیص دهد؛ وگرنه فقط پیام‌های ریپلای/منشن‌شده به دستش می‌رسد.
 
 ---
 

@@ -33,6 +33,19 @@ class PaymentStatus:
     ALL = (PENDING, APPROVED, REJECTED)
 
 
+class GroupEventKind:
+    REQUEST = "request"  # درخواست پرداخت (الف از ب می‌خواهد بپردازد)
+    PAYMENT = "payment"  # پرداخت انجام‌شده
+    ALL = (REQUEST, PAYMENT)
+
+
+class GroupEventStatus:
+    OPEN = "open"        # درخواستِ بازِ پرداخت‌نشده
+    SETTLED = "settled"  # درخواستِ پرداخت‌شده
+    LOGGED = "logged"    # پرداختِ مستقل (بدون درخواست قبلی)
+    ALL = (OPEN, SETTLED, LOGGED)
+
+
 # --- کمک‌توابع تبدیل مقدار ↔ سلولِ شیت --------------------------------------
 
 
@@ -383,9 +396,68 @@ class Product:
         )
 
 
+@dataclass
+class GroupEvent:
+    """یک رویداد مالی در یک گروه تلگرام (درخواست پرداخت یا پرداخت).
+
+    برای ``kind == "request"``: ``actor`` درخواست‌دهنده و ``counterparty`` کسی
+    است که باید بپردازد. برای ``kind == "payment"``: ``actor`` پرداخت‌کننده و
+    ``counterparty`` دریافت‌کننده است. ``request_id`` یک پرداخت را به درخواستِ
+    مرتبطش وصل می‌کند.
+    """
+
+    TABLE = "group_events"
+    COLUMNS = (
+        "id", "chat_id", "kind", "actor_id", "actor_name",
+        "counterparty_id", "counterparty_name", "amount", "reason",
+        "status", "request_id", "created_at", "settled_at",
+    )
+
+    id: Optional[int] = None
+    chat_id: int = 0
+    kind: str = GroupEventKind.REQUEST
+    actor_id: int = 0
+    actor_name: str = ""
+    counterparty_id: Optional[int] = None
+    counterparty_name: str = ""
+    amount: int = 0
+    reason: str = ""
+    status: str = GroupEventStatus.OPEN
+    request_id: Optional[int] = None
+    created_at: Optional[dt.datetime] = None
+    settled_at: Optional[dt.datetime] = None
+
+    def to_row(self) -> list:
+        return [
+            _s(self.id), _s(self.chat_id), _s(self.kind), _s(self.actor_id),
+            _s(self.actor_name), _s(self.counterparty_id),
+            _s(self.counterparty_name), _s(self.amount), _s(self.reason),
+            _s(self.status), _s(self.request_id), _s(self.created_at),
+            _s(self.settled_at),
+        ]
+
+    @classmethod
+    def from_row(cls, d: dict) -> "GroupEvent":
+        return cls(
+            id=_pint(d.get("id")),
+            chat_id=_pint(d.get("chat_id")) or 0,
+            kind=_pstr(d.get("kind")) or GroupEventKind.REQUEST,
+            actor_id=_pint(d.get("actor_id")) or 0,
+            actor_name=_pstr(d.get("actor_name")),
+            counterparty_id=_pint(d.get("counterparty_id")),
+            counterparty_name=_pstr(d.get("counterparty_name")),
+            amount=_pint(d.get("amount")) or 0,
+            reason=_pstr(d.get("reason")),
+            status=_pstr(d.get("status")) or GroupEventStatus.OPEN,
+            request_id=_pint(d.get("request_id")),
+            created_at=_pdt(d.get("created_at")),
+            settled_at=_pdt(d.get("settled_at")),
+        )
+
+
 #: همه‌ی مدل‌ها به ترتیب تب‌ها (برای ساخت تب‌ها و بارگذاری).
 ALL_MODELS = (
     User, Transaction, LedgerEntry, Invoice, InvoiceItem,
-    Subscription, Payment, Product,
+    Subscription, Payment, Product, GroupEvent,
 )
 TABLE_MODELS = {m.TABLE: m for m in ALL_MODELS}

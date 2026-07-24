@@ -12,7 +12,7 @@ import re
 import tempfile
 from contextlib import contextmanager
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -23,14 +23,15 @@ from telegram.ext import (
 )
 
 from .. import plans
-from ..core import categories, jalali, money
-from ..db.models import Direction, Kind, PaymentStatus
+from ..core import categories, group_nlp, jalali, money
+from ..db.models import Direction, GroupEventKind, Kind, PaymentStatus
 from ..pdf.invoice_pdf import render_invoice_image, render_invoice_pdf
 from ..services import backup as backup_service
 from ..services import dashboard as dashboard_service
 from ..services import export as export_service
 from ..services import extract as extract_service
 from ..services import gateway as gateway_service
+from ..services import group_ledger as group_service
 from ..services import ingest as ingest_service
 from ..services import invoices as invoice_service
 from ..services import ledger as ledger_service
@@ -83,6 +84,11 @@ def _clear_flow(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    if chat is not None and chat.type in ("group", "supergroup"):
+        return await update.message.reply_text(
+            texts.GROUP_INTRO, parse_mode="HTML"
+        )
     _clear_flow(context)
     uid = update.effective_user.id
     with _session(context) as session:
@@ -1342,6 +1348,188 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _route_text(update, context, text)
 
 
+# --- حالت گروه (دفتر مالی گروهی) ---------------------------------------------
+
+
+def _display_name(user) -> str:
+    """نام نمایشیِ یک کاربر تلگرام."""
+    if user is None:
+        return "—"
+    name = (getattr(user, "full_name", "") or "").strip()
+    if not name:
+        uname = (getattr(user, "username", "") or "").strip()
+        name = f"@{uname}" if uname else str(getattr(user, "id", "") or "")
+    return name or "—"
+
+
+def _mentioned_party(message) -> tuple:
+    """(id, name) طرفِ اشاره‌شده: text_mention، سپس @username، سپس ریپلای."""
+    text = message.text or ""
+    entities = message.entities or []
+    for ent in entities:  # text_mention: شیء کاربر کامل را داریم
+        if ent.type == "text_mention" and ent.user is not None:
+            return ent.user.id, _display_name(ent.user)
+    for ent in entities:  # @username: فقط نام کاربری متنی
+        if ent.type == "mention":
+            return None, text[ent.offset: ent.offset + ent.length]
+    reply = getattr(message, "reply_to_message", None)
+    if reply is not None and reply.from_user is not None:
+        return reply.from_user.id, _display_name(reply.from_user)
+    return None, ""
+
+
+async def on_group_added(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """وقتی بات به گروه اضافه می‌شود، خودش را معرفی می‌کند."""
+    msg = update.message
+    if msg is None or not msg.new_chat_members:
+        return
+    if any(m.id == context.bot.id for m in msg.new_chat_members):
+        await msg.reply_text(texts.GROUP_INTRO, parse_mode="HTML")
+
+
+async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """گزارش وضعیت مالی گروه (/balance)."""
+    chat = update.effective_chat
+    if chat is None or chat.type not in ("group", "supergroup"):
+        return await update.message.reply_text(texts.GROUP_PRIVATE_ONLY)
+    store = _store(context)
+    await update.message.reply_text(
+        group_service.build_group_report(store, chat.id), parse_mode="HTML"
+    )
+
+
+def _group_confirm_body(pending: dict) -> str:
+    """متن «ثبتش کنم؟» را از روی دادهٔ در انتظار می‌سازد."""
+    amount = pending.get("amount")
+    amount_str = money.format_amount(amount) if amount else "؟"
+    reason = pending.get("reason") or ""
+    reason_line = f"\nبابت: {reason}" if reason else ""
+    actor = pending.get("actor_name") or "—"
+    cp = pending.get("counterparty_name") or "—"
+    if pending["kind"] == GroupEventKind.REQUEST:
+        head = texts.GROUP_CONFIRM_REQUEST
+        who = f"{actor} از {cp}: {amount_str}"
+    else:
+        head = texts.GROUP_CONFIRM_PAYMENT
+        to = f" به {cp}" if pending.get("counterparty_name") else ""
+        who = f"{actor}{to}: {amount_str}"
+    return f"{head}\n{who}{reason_line}\n\n{texts.GROUP_CONFIRM_ASK}"
+
+
+async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """رصد پیام‌های گروه؛ رویداد مالی را تشخیص و برای تأیید پیشنهاد می‌دهد.
+
+    فقط وقتی کار می‌کند که Privacy Mode بات خاموش باشد (تا همه‌ی پیام‌ها را ببیند).
+    """
+    msg = update.message
+    if msg is None or not msg.text:
+        return
+    parsed = group_nlp.detect_group_event(msg.text)
+    if parsed is None:
+        return
+    sender = update.effective_user
+    if sender is None:
+        return
+
+    chat_id = msg.chat_id
+    store = _store(context)
+    cp_id, cp_name = _mentioned_party(msg)
+    pending = {
+        "kind": parsed.kind,
+        "chat_id": chat_id,
+        "actor_id": sender.id,
+        "actor_name": _display_name(sender),
+        "reason": parsed.reason,
+        "amount": parsed.amount,
+        "counterparty_id": cp_id,
+        "counterparty_name": cp_name,
+        "request_id": None,
+    }
+
+    if parsed.kind == GroupEventKind.PAYMENT:
+        # آیا این پرداخت به یک درخواستِ بازِ همین شخص می‌خورد؟
+        req = group_service.find_open_request_for(
+            store, chat_id, sender.id, parsed.amount
+        )
+        if req is not None:
+            pending["request_id"] = req.id
+            pending["amount"] = parsed.amount or req.amount
+            if not pending["reason"]:
+                pending["reason"] = req.reason
+            if not pending["counterparty_id"] and not pending["counterparty_name"]:
+                pending["counterparty_id"] = req.actor_id
+                pending["counterparty_name"] = req.actor_name
+        if not pending["amount"]:
+            return  # بدون مبلغ و بدون درخواستِ متناظر، چیزی برای ثبت نیست
+    else:  # REQUEST
+        if not parsed.amount:
+            return  # درخواستِ بدون مبلغ را نادیده بگیر (نویز)
+
+    token = msg.message_id
+    context.chat_data.setdefault("grp_pending", {})[token] = pending
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_GROUP_CONFIRM, callback_data=f"grp:ok:{token}"),
+        InlineKeyboardButton(texts.BTN_GROUP_REJECT, callback_data=f"grp:no:{token}"),
+    ]])
+    await msg.reply_text(
+        _group_confirm_body(pending), reply_markup=keyboard, parse_mode="HTML"
+    )
+
+
+async def _grp_edit(query, text: str) -> None:
+    try:
+        await query.edit_message_text(text, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های «✅ ثبت کن / ❌ نه» زیر پیشنهادِ رویداد گروه."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, action, token_s = query.data.split(":")
+        token = int(token_s)
+    except (ValueError, AttributeError):
+        return
+    pending = (context.chat_data.get("grp_pending") or {}).pop(token, None)
+    if pending is None:
+        return await _grp_edit(query, texts.GROUP_STALE)
+    if action == "no":
+        return await _grp_edit(query, texts.GROUP_DISCARDED)
+
+    store = _store(context)
+    chat_id = pending["chat_id"]
+    if pending["kind"] == GroupEventKind.REQUEST:
+        await group_service.add_request(
+            store, chat_id,
+            requester_id=pending["actor_id"],
+            requester_name=pending["actor_name"],
+            payer_id=pending["counterparty_id"],
+            payer_name=pending["counterparty_name"],
+            amount=pending["amount"], reason=pending["reason"],
+        )
+        head = texts.GROUP_SAVED_REQUEST
+    else:
+        await group_service.add_payment(
+            store, chat_id,
+            payer_id=pending["actor_id"],
+            payer_name=pending["actor_name"],
+            payee_id=pending["counterparty_id"],
+            payee_name=pending["counterparty_name"],
+            amount=pending["amount"], reason=pending["reason"],
+            request_id=pending["request_id"],
+        )
+        head = (
+            texts.GROUP_SAVED_PAYMENT_SETTLED
+            if pending["request_id"]
+            else texts.GROUP_SAVED_PAYMENT
+        )
+    await store.flush()  # رویداد مالیِ گروه را فوری روی شیت بنویس
+    report = group_service.build_group_report(store, chat_id)
+    await _grp_edit(query, f"{head}\n\n{report}")
+
+
 # --- ثبت هندلرها --------------------------------------------------------------
 
 
@@ -1356,6 +1544,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("dashboard", dashboard_cmd))
     application.add_handler(CommandHandler("list", list_cmd))
     application.add_handler(CommandHandler("products", products_cmd))
+    application.add_handler(CommandHandler("balance", balance_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
@@ -1369,7 +1558,24 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
-    application.add_handler(MessageHandler(filters.PHOTO, on_photo))
-    application.add_handler(MessageHandler(filters.Document.ALL, on_document))
-    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, on_voice))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
+    # پیام‌های خصوصی (۱:۱) — جریان‌های شخصیِ کاربر
+    private = filters.ChatType.PRIVATE
+    application.add_handler(MessageHandler(filters.PHOTO & private, on_photo))
+    application.add_handler(MessageHandler(filters.Document.ALL & private, on_document))
+    application.add_handler(
+        MessageHandler((filters.VOICE | filters.AUDIO) & private, on_voice)
+    )
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND & private, on_text)
+    )
+    # پیام‌های گروه — دفتر مالی گروهی (نیازمند خاموش‌بودن Privacy Mode)
+    application.add_handler(
+        MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_group_added)
+    )
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+            on_group_message,
+        )
+    )

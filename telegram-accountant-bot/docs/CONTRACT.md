@@ -30,7 +30,8 @@
 
 ### `hesabyar.db.models`
 - مدل‌ها **دیتاکلاس** ساده‌اند (نه ORM): `User`, `Transaction`, `LedgerEntry`,
-  `Invoice`, `InvoiceItem`, `Subscription`, `Payment`, `Product`.
+  `Invoice`, `InvoiceItem`, `Subscription`, `Payment`, `Product`, `GroupEvent`
+  (رویدادهای مالیِ گروه: درخواست پرداخت/پرداخت).
 - هر مدل classvarهای `TABLE` (نام تب) و `COLUMNS` (ترتیب ستون‌ها) و متدهای
   `to_row() -> list` و `from_row(cls, dict) -> obj` دارد (سریال‌سازی برای شیت:
   datetime/date به ISO، bool به `"TRUE"`/`"FALSE"`).
