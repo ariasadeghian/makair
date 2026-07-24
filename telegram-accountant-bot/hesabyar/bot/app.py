@@ -5,6 +5,7 @@ import asyncio
 import datetime as dt
 import logging
 
+from telegram import BotCommand
 from telegram.ext import Application
 
 from ..config import Settings
@@ -61,6 +62,25 @@ async def _on_startup(application: Application) -> None:
                     continue
 
     store.on_flush_error = _alert
+
+    # منوی دستورات تلگرام (دکمه‌ی «/») برای کشف‌پذیری بهتر.
+    try:
+        await application.bot.set_my_commands([
+            BotCommand("start", "شروع / منوی اصلی"),
+            BotCommand("help", "راهنما"),
+            BotCommand("list", "تراکنش‌های اخیر"),
+            BotCommand("dashboard", "داشبورد تصویری"),
+            BotCommand("export", "خروجی اکسل"),
+            BotCommand("backup", "پشتیبان کامل"),
+            BotCommand("search", "جست‌وجو در تراکنش‌ها"),
+            BotCommand("products", "کالاهای من"),
+            BotCommand("balance", "وضعیت مالی گروه"),
+            BotCommand("undo", "لغو آخرین ثبت"),
+            BotCommand("cancel", "لغو"),
+        ])
+    except Exception:  # noqa: BLE001 - منوی دستورات ضروری نیست
+        logger.warning("تنظیم منوی دستورات ناموفق بود.")
+
     logger.info("Store آماده شد؛ نوشتن پس‌زمینه هر ۵ ثانیه فعال است.")
 
 

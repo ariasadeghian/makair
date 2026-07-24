@@ -41,6 +41,7 @@ from ..services import invoices as invoice_service
 from ..services import ledger as ledger_service
 from ..services import moadian as moadian_service
 from ..services import ocr as ocr_service
+from ..services import pilot as pilot_service
 from ..services import products as products_service
 from ..services import stt as stt_service
 from ..services import reports as report_service
@@ -1477,6 +1478,19 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+async def pilot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """داشبورد سنجه‌های پایلوت (فقط ادمین)."""
+    settings = context.application.bot_data["settings"]
+    uid = update.effective_user.id
+    if uid not in settings.admin_ids:
+        return await update.message.reply_text(texts.ADMIN_NOT_ALLOWED)
+    store = _store(context)
+    metrics = pilot_service.compute_pilot_metrics(store, jalali.now())
+    await update.message.reply_text(
+        pilot_service.build_pilot_report(metrics), parse_mode="HTML"
+    )
+
+
 def _group_confirm_body(pending: dict) -> str:
     """متن «ثبتش کنم؟» را از روی دادهٔ در انتظار می‌سازد."""
     amount = pending.get("amount")
@@ -1624,6 +1638,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("list", list_cmd))
     application.add_handler(CommandHandler("products", products_cmd))
     application.add_handler(CommandHandler("balance", balance_cmd))
+    application.add_handler(CommandHandler("pilot", pilot_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
