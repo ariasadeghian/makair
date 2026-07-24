@@ -80,12 +80,32 @@ def due_within(
     return sorted(rows, key=_due_key)
 
 
-def entries_due_for_reminder(store: Store, base: dt.datetime) -> list[LedgerEntry]:
-    today = base.date()
-    return store.list(
+def entries_due_for_reminder(
+    store: Store, base: dt.datetime, lead_days: int = 0
+) -> list[LedgerEntry]:
+    """ردیف‌های بازِ سررسیدشده و نزدیک‌به‌سررسید (تا ``lead_days`` روز آینده).
+
+    با ``lead_days=0`` فقط معوق‌ها و سررسیدِ امروز برمی‌گردند (رفتار پیشین).
+    خروجی بر اساس تاریخ سررسید مرتب است (نزدیک‌تر اول).
+    """
+    horizon = base.date() + dt.timedelta(days=max(0, lead_days))
+    rows = store.list(
         "ledger_entries",
-        lambda e: not e.is_settled and e.due_date is not None and e.due_date <= today,
+        lambda e: not e.is_settled
+        and e.due_date is not None
+        and e.due_date <= horizon,
     )
+    return sorted(rows, key=_due_key)
+
+
+def due_bucket(entry: LedgerEntry, base: dt.datetime) -> str:
+    """دسته‌ی یادآوری یک ردیف: ``overdue`` | ``today`` | ``upcoming``."""
+    today = base.date()
+    if entry.due_date is None or entry.due_date > today:
+        return "upcoming"
+    if entry.due_date < today:
+        return "overdue"
+    return "today"
 
 
 def build_ledger_report(store: Store, user_id: int) -> str:

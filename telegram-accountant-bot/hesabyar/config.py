@@ -63,6 +63,8 @@ class Settings:
     # ساعت محلی ارسال یادآوری روزانه‌ی سررسیدها (۰ تا ۲۳)
     reminder_hour: int = 9
     reminder_minute: int = 0
+    # چند روز قبل از سررسید هم پیشاپیش یادآوری شود (۰ = فقط روز سررسید و معوق)
+    reminder_lead_days: int = 2
     # سرویس OCR اختیاری (سازگار با API نوع OpenAI برای مدل‌های تصویری)
     ocr_base_url: str | None = None
     ocr_api_key: str | None = None
@@ -73,6 +75,12 @@ class Settings:
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    # تبدیل گفتار به متن (ویس→متن). سازگار با API نوع OpenAI (whisper). اگر
+    # STT_* تنظیم نشود از همان تنظیمات OCR استفاده می‌شود.
+    stt_base_url: str | None = None
+    stt_api_key: str | None = None
+    stt_model: str = "whisper-1"
+    stt_language: str = "fa"
     admin_ids: tuple[int, ...] = field(default_factory=tuple)
     # پرداخت کارت‌به‌کارت اشتراک
     card_number: str = ""
@@ -111,6 +119,19 @@ class Settings:
     def llm_enabled(self) -> bool:
         return self.use_llm_parser and self.llm_creds is not None
 
+    @property
+    def stt_creds(self) -> tuple[str, str, str, str] | None:
+        """(base_url, api_key, model, language) برای STT؛ با fallback به OCR."""
+        base = self.stt_base_url or self.ocr_base_url
+        key = self.stt_api_key or self.ocr_api_key
+        if base and key:
+            return (base, key, self.stt_model, self.stt_language)
+        return None
+
+    @property
+    def stt_enabled(self) -> bool:
+        return self.stt_creds is not None
+
 
 def load_settings(require_token: bool = True) -> Settings:
     """ساخت شیء تنظیمات از محیط.
@@ -145,6 +166,7 @@ def load_settings(require_token: bool = True) -> Settings:
         default_currency=_get("DEFAULT_CURRENCY", "تومان"),
         reminder_hour=_get_int("REMINDER_HOUR", 9),
         reminder_minute=_get_int("REMINDER_MINUTE", 0),
+        reminder_lead_days=_get_int("REMINDER_LEAD_DAYS", 2),
         ocr_base_url=_get("OCR_BASE_URL"),
         ocr_api_key=_get("OCR_API_KEY"),
         ocr_model=_get("OCR_MODEL", "gpt-4o-mini"),
@@ -152,6 +174,10 @@ def load_settings(require_token: bool = True) -> Settings:
         llm_base_url=_get("LLM_BASE_URL"),
         llm_api_key=_get("LLM_API_KEY"),
         llm_model=_get("LLM_MODEL"),
+        stt_base_url=_get("STT_BASE_URL"),
+        stt_api_key=_get("STT_API_KEY"),
+        stt_model=_get("STT_MODEL", "whisper-1"),
+        stt_language=_get("STT_LANGUAGE", "fa"),
         admin_ids=admin_ids,
         card_number=_get("CARD_NUMBER", ""),
         card_holder=_get("CARD_HOLDER", ""),

@@ -12,6 +12,7 @@ from ..core import jalali
 from ..db import sheets_client
 from ..db.store import Store
 from ..services import ocr as ocr_service
+from ..services import stt as stt_service
 from . import handlers, reminders
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ def build_application(settings: Settings) -> Application:
     )
     application.bot_data["settings"] = settings
     application.bot_data["ocr"] = ocr_service.get_ocr_provider(settings)
+    application.bot_data["stt"] = stt_service.get_stt_provider(settings)
 
     handlers.register(application)
 

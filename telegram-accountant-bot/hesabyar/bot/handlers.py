@@ -37,6 +37,7 @@ from ..services import ledger as ledger_service
 from ..services import moadian as moadian_service
 from ..services import ocr as ocr_service
 from ..services import products as products_service
+from ..services import stt as stt_service
 from ..services import reports as report_service
 from ..services import subscription as sub_service
 from ..services import transactions as tx_service
@@ -372,7 +373,14 @@ async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    text = (update.message.text or "").strip()
+    await _route_text(update, context, update.message.text or "")
+
+
+async def _route_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
+) -> None:
+    """مسیریابی یک پیام متنی (تایپ‌شده یا رونویسی‌شده‌ی ویس) به جریان درست."""
+    text = (text or "").strip()
     flow = context.user_data.get("flow")
 
     # جریان‌های چندمرحله‌ای
@@ -546,8 +554,13 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
             session.commit()
             report = ledger_service.build_ledger_report(session, uid)
         _clear_flow(context)
+        saved = (
+            texts.LEDGER_SAVED_WITH_DUE.format(date=jalali.format_date(due_date))
+            if due_date is not None
+            else texts.LEDGER_SAVED
+        )
         await update.message.reply_text(
-            f"{texts.LEDGER_SAVED}\n\n{report}", reply_markup=keyboards.main_menu()
+            f"{saved}\n\n{report}", reply_markup=keyboards.main_menu()
         )
 
 
@@ -1286,6 +1299,49 @@ async def _ingest_from_url(
     await _process_receipt_image(update, context, image_bytes, texts.INGEST_SOURCE_LINK)
 
 
+async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """پیام صوتی (ویس/فایل صوتی): به متن تبدیل و مثل متن معمولی پردازش می‌شود."""
+    msg = update.message
+    media = msg.voice or msg.audio
+    if media is None:
+        return
+
+    provider = context.application.bot_data.get("stt")
+    if provider is None or isinstance(provider, stt_service.NullSttProvider):
+        return await msg.reply_text(texts.VOICE_DISABLED)
+
+    # سقف مدت تا هزینه و تأخیر کنترل شود (۵ دقیقه).
+    duration = getattr(media, "duration", 0) or 0
+    if duration > 300:
+        return await msg.reply_text(texts.VOICE_TOO_LONG)
+
+    await msg.reply_text(texts.VOICE_TRANSCRIBING)
+    try:
+        tg_file = await media.get_file()
+        audio_bytes = bytes(await tg_file.download_as_bytearray())
+    except Exception:
+        return await msg.reply_text(texts.VOICE_FAILED)
+
+    mime = getattr(media, "mime_type", None) or "audio/ogg"
+    filename = getattr(media, "file_name", None) or "voice.ogg"
+    try:
+        text = await provider.transcribe(
+            audio_bytes, mime_type=mime, filename=filename
+        )
+    except stt_service.SttUnavailable:
+        return await msg.reply_text(texts.VOICE_FAILED)
+    except Exception:  # noqa: BLE001 - هر خطای غیرمنتظره‌ی رونویسی
+        return await msg.reply_text(texts.VOICE_FAILED)
+
+    text = (text or "").strip()
+    if not text:
+        return await msg.reply_text(texts.VOICE_EMPTY)
+
+    # آنچه شنیده شد را نشان بده تا کاربر مطمئن شود درست فهمیده‌ایم.
+    await msg.reply_text(texts.VOICE_HEARD.format(text=text))
+    await _route_text(update, context, text)
+
+
 # --- ثبت هندلرها --------------------------------------------------------------
 
 
@@ -1315,4 +1371,5 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(MessageHandler(filters.PHOTO, on_photo))
     application.add_handler(MessageHandler(filters.Document.ALL, on_document))
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, on_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
