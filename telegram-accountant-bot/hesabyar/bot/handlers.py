@@ -25,7 +25,11 @@ from telegram.ext import (
 from .. import plans
 from ..core import categories, group_nlp, jalali, money
 from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
-from ..pdf.invoice_pdf import render_invoice_image, render_invoice_pdf
+from ..pdf.invoice_pdf import (
+    render_invoice_image,
+    render_invoice_pdf,
+    render_statement_image,
+)
 from ..services import backup as backup_service
 from ..services import dashboard as dashboard_service
 from ..services import export as export_service
@@ -606,25 +610,43 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
 
 
 async def _handle_statement(update, context, text: str) -> None:
-    """ساخت صورتحساب یک طرف‌حساب برای فوروارد کردن."""
+    """صورتحساب یک طرف‌حساب را به‌صورت کارتِ تصویری (و متن) می‌فرستد."""
     name = text.strip()
     _clear_flow(context)
     if not name:
         return await update.message.reply_text(texts.STATEMENT_ASK_NAME)
     uid = update.effective_user.id
+    chat_id = update.effective_chat.id
     with _session(context) as session:
         user = await tx_service.get_or_create_user(session, uid)
+        data = ledger_service.party_statement_data(session, uid, name, business=user)
         statement = ledger_service.build_party_statement(
             session, uid, name, business=user
         )
-    if statement is None:
+    if data is None:
         return await update.message.reply_text(
             texts.STATEMENT_EMPTY.format(name=name),
             reply_markup=keyboards.main_menu(),
         )
-    await update.message.reply_text(
-        statement, parse_mode="HTML", reply_markup=keyboards.main_menu()
-    )
+    out_path = os.path.join(tempfile.gettempdir(), f"statement_{uid}.png")
+    try:
+        render_statement_image(data, out_path)
+        with open(out_path, "rb") as fh:
+            await context.bot.send_photo(
+                chat_id, photo=fh,
+                caption=texts.STATEMENT_CAPTION.format(name=name),
+                reply_markup=keyboards.main_menu(),
+            )
+    except Exception:  # noqa: BLE001 - اگر رندر تصویر نشد، متن را می‌فرستیم
+        await update.message.reply_text(
+            statement, parse_mode="HTML", reply_markup=keyboards.main_menu()
+        )
+    finally:
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
 
 
 # --- فاکتور -------------------------------------------------------------------

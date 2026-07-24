@@ -297,3 +297,140 @@ def render_invoice_image(
             except OSError:
                 pass
     return out_path
+
+
+def render_statement_pdf(data: dict, out_path: str) -> str:
+    """کارتِ «صورتحساب طرف‌حساب» را به‌صورت یک PDF جمع‌وجور می‌سازد.
+
+    ``data`` همان دیکشنریِ خروجی
+    :func:`hesabyar.services.ledger.party_statement_data` است:
+    ``party``، ``business_name``، ``date``، ``entries`` (فهرست
+    ``{label, amount, due_date, is_cheque}``) و ``net``.
+    اندازه‌ی صفحه بر اساس تعداد ردیف‌ها محاسبه می‌شود تا کارت بدون فضای خالیِ
+    اضافه و مناسبِ فوروارد باشد.
+    """
+    font_name = register_font()
+    entries = list(data.get("entries") or [])
+    n = max(1, len(entries))
+    page_w = 120 * mm
+    # ارتفاعِ سخاوتمند تا هیچ‌وقت محتوا (به‌ویژه خطِ مانده) نصفه نشود؛
+    # فضای خالیِ اضافه بعداً در تصویر auto-crop می‌شود.
+    page_h = (80 + n * 14) * mm
+
+    title_style = ParagraphStyle(
+        "StTitle", fontName=font_name, fontSize=16, alignment=TA_CENTER, leading=24,
+    )
+    biz_style = ParagraphStyle(
+        "StBiz", fontName=font_name, fontSize=13, alignment=TA_CENTER, leading=20,
+    )
+    sub_style = ParagraphStyle(
+        "StSub", fontName=font_name, fontSize=10, alignment=TA_CENTER, leading=16,
+        textColor=colors.HexColor("#666666"),
+    )
+
+    story: list = []
+    if data.get("business_name"):
+        story.append(_para(data["business_name"], biz_style))
+    story.append(_para("صورتحساب", title_style))
+    story.append(_para(f"طرف‌حساب: {data.get('party', '')}", sub_style))
+    story.append(Spacer(1, 4 * mm))
+
+    head = [shape_fa("مبلغ (تومان)"), shape_fa("سررسید"), shape_fa("شرح")]
+    table_data: list[list[str]] = [head]
+    for row in entries:
+        due = jalali.format_date(row["due_date"]) if row.get("due_date") else "—"
+        tag = "چک " if row.get("is_cheque") else ""
+        desc = f"{tag}{row.get('label', '')} شما"
+        table_data.append([
+            shape_fa(money.format_amount(row["amount"], with_currency=False)),
+            shape_fa(due),
+            shape_fa(desc),
+        ])
+    table = Table(table_data, colWidths=[34 * mm, 30 * mm, 44 * mm])
+    table.setStyle(
+        TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#BBBBBB")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EFEFEF")),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ])
+    )
+    story.append(table)
+    story.append(Spacer(1, 5 * mm))
+
+    net = int(data.get("net", 0))
+    if net > 0:
+        balance_text = f"مانده: {money.format_amount(net)} بدهکار"
+    elif net < 0:
+        balance_text = f"مانده: {money.format_amount(-net)} بستانکار"
+    else:
+        balance_text = "مانده: تسویه"
+    balance_style = ParagraphStyle(
+        "StBal", fontName=font_name, fontSize=15, alignment=TA_CENTER, leading=24,
+        textColor=colors.HexColor("#1f3a5f"),
+    )
+    story.append(_para(balance_text, balance_style))
+    story.append(Spacer(1, 2 * mm))
+    date_val = data.get("date")
+    if date_val is not None:
+        story.append(_para(f"تاریخ: {jalali.format_date(date_val)}", sub_style))
+
+    doc = SimpleDocTemplate(
+        out_path, pagesize=(page_w, page_h),
+        rightMargin=10 * mm, leftMargin=10 * mm,
+        topMargin=8 * mm, bottomMargin=8 * mm, title="صورتحساب",
+    )
+    doc.build(story)
+    return out_path
+
+
+def _autocrop_whitespace(path: str, pad: int = 26) -> None:
+    """حاشیه‌ی سفیدِ اطرافِ یک PNG را می‌بُرد تا کارت جمع‌وجور شود.
+
+    اگر Pillow در دسترس نباشد یا تصویر تماماً سفید باشد، بی‌سروصدا رد می‌شود.
+    """
+    try:
+        from PIL import Image, ImageChops
+    except Exception:  # noqa: BLE001 - بدون Pillow فقط crop نمی‌شود
+        return
+    try:
+        img = Image.open(path).convert("RGB")
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        bbox = ImageChops.difference(img, bg).getbbox()
+        if not bbox:
+            return
+        left = max(0, bbox[0] - pad)
+        top = max(0, bbox[1] - pad)
+        right = min(img.width, bbox[2] + pad)
+        bottom = min(img.height, bbox[3] + pad)
+        img.crop((left, top, right, bottom)).save(path)
+    except Exception:  # noqa: BLE001 - crop یک صیقلِ اختیاری است
+        return
+
+
+def render_statement_image(data: dict, out_path: str, dpi: int = 150) -> str:
+    """صورتحساب طرف‌حساب را به‌صورت تصویر PNG می‌سازد (برای فوروارد آسان)."""
+    import os
+    import tempfile
+
+    import fitz  # pymupdf
+
+    fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        render_statement_pdf(data, tmp_pdf)
+        with fitz.open(tmp_pdf) as doc:
+            doc[0].get_pixmap(dpi=dpi).save(out_path)
+        _autocrop_whitespace(out_path)
+    finally:
+        if os.path.exists(tmp_pdf):
+            try:
+                os.remove(tmp_pdf)
+            except OSError:
+                pass
+    return out_path

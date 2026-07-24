@@ -64,6 +64,41 @@ class TestPartyStatement:
         await tx.get_or_create_user(store, UID)
         assert ledger_service.build_party_statement(store, UID, "ناکس") is None
 
+    async def test_statement_data_shape(self, store):
+        await tx.get_or_create_user(store, UID)
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.RECEIVABLE,
+            party_name="حسینی", amount=750_000,
+        )
+        data = ledger_service.party_statement_data(store, UID, "حسینی")
+        assert data is not None
+        assert data["net"] == 750_000
+        assert len(data["entries"]) == 1
+        assert data["entries"][0]["label"] == "طلب از"
+
+
+class TestStatementImage:
+    async def test_png_created(self, store, tmp_path):
+        from hesabyar.pdf.invoice_pdf import render_statement_image
+
+        user = await tx.get_or_create_user(store, UID)
+        user.business_name = "بوتیک آرا"
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.RECEIVABLE, party_name="رضا رضایی",
+            amount=500_000, due_date=jalali.now().date(),
+        )
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.PAYABLE, party_name="رضا رضایی",
+            amount=200_000, instrument=Instrument.CHEQUE, cheque_no="998877",
+        )
+        data = ledger_service.party_statement_data(store, UID, "رضا رضایی", business=user)
+        out = str(tmp_path / "statement.png")
+        render_statement_image(data, out)
+        with open(out, "rb") as fh:
+            assert fh.read(8) == b"\x89PNG\r\n\x1a\n"
+        import os as _os
+        assert _os.path.getsize(out) > 3000
+
 
 class TestDailyDigest:
     async def test_active_user_gets_digest(self, store):

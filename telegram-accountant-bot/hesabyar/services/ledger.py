@@ -152,10 +152,13 @@ def entries_for_party(store: Store, user_id: int, party_name: str) -> list[Ledge
     return sorted(store.list("ledger_entries", _match), key=_due_key)
 
 
-def build_party_statement(
+def party_statement_data(
     store: Store, user_id: int, party_name: str, business=None
-) -> Optional[str]:
-    """صورتحسابِ یک طرف‌حساب برای فوروارد کردن؛ ``None`` اگر ردیفی نباشد."""
+) -> Optional[dict]:
+    """داده‌ی ساخت‌یافته‌ی صورتحسابِ یک طرف‌حساب؛ ``None`` اگر ردیفی نباشد.
+
+    منبعِ مشترکِ هم متنِ صورتحساب و هم کارتِ تصویری آن است.
+    """
     entries = entries_for_party(store, user_id, party_name)
     if not entries:
         return None
@@ -164,25 +167,54 @@ def build_party_statement(
         int(e.amount) for e in entries if e.direction == Direction.RECEIVABLE
     )
     payable = sum(int(e.amount) for e in entries if e.direction == Direction.PAYABLE)
-    net = receivable - payable  # مثبت = او به ما بدهکار است
+    rows = [
+        {
+            "label": "طلب از" if e.direction == Direction.RECEIVABLE else "بدهی به",
+            "amount": int(e.amount),
+            "due_date": e.due_date,
+            "is_cheque": e.is_cheque,
+        }
+        for e in entries
+    ]
+    return {
+        "party": party_name,
+        "business_name": getattr(business, "business_name", None) if business else None,
+        "date": jalali.now(),
+        "entries": rows,
+        "receivable": receivable,
+        "payable": payable,
+        "net": receivable - payable,  # مثبت = او به ما بدهکار است
+    }
+
+
+def build_party_statement(
+    store: Store, user_id: int, party_name: str, business=None
+) -> Optional[str]:
+    """صورتحسابِ متنیِ یک طرف‌حساب برای فوروارد کردن؛ ``None`` اگر ردیفی نباشد."""
+    data = party_statement_data(store, user_id, party_name, business)
+    if data is None:
+        return None
 
     header = "📄 <b>صورتحساب</b>"
-    if business is not None and getattr(business, "business_name", None):
-        header += f" — {business.business_name}"
-    lines = [header, f"طرف‌حساب: <b>{party_name}</b>", ""]
-    for e in entries:
-        label = "طلب از" if e.direction == Direction.RECEIVABLE else "بدهی به"
-        due = f" (سررسید {jalali.format_date(e.due_date)})" if e.due_date else ""
-        tag = "🧾 چک " if e.is_cheque else ""
+    if data["business_name"]:
+        header += f" — {data['business_name']}"
+    lines = [header, f"طرف‌حساب: <b>{data['party']}</b>", ""]
+    for row in data["entries"]:
+        due = (
+            f" (سررسید {jalali.format_date(row['due_date'])})"
+            if row["due_date"] else ""
+        )
+        tag = "🧾 چک " if row["is_cheque"] else ""
         lines.append(
-            f"• {tag}{label} شما: {money.format_amount(e.amount)}{due}"
+            f"• {tag}{row['label']} شما: {money.format_amount(row['amount'])}{due}"
         )
     lines.append("")
+    net = data["net"]
     if net > 0:
         lines.append(f"💰 <b>مانده: {money.format_amount(net)} بدهکار</b>")
     elif net < 0:
         lines.append(f"💰 <b>مانده: {money.format_amount(-net)} بستانکار</b>")
     else:
         lines.append("💰 <b>مانده: تسویه</b>")
-    lines.append(f"\n🗓 {jalali.format_date(jalali.now())}")
+    lines.append(f"\n🗓 {jalali.format_date(data['date'])}")
     return "\n".join(lines)
