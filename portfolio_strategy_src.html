@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>سند استراتژی و چشم‌انداز پرتفولیو</title>
+<style>
+  @font-face { font-family:'Vazirmatn'; src:url(data:font/ttf;base64,{{FONT_REGULAR}}) format('truetype'); font-weight:400; }
+  @font-face { font-family:'Vazirmatn'; src:url(data:font/ttf;base64,{{FONT_BOLD}}) format('truetype'); font-weight:700; }
+  @page { size:A4; margin:15mm 13mm 17mm 13mm; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Vazirmatn',sans-serif; direction:rtl; color:#1c1f2a; font-size:9.6pt; line-height:1.75; }
+  .ltr { direction:ltr; unicode-bidi:isolate; font-family:'Vazirmatn',sans-serif; }
+
+  /* ── cover ── */
+  .cover { page-break-after:always; padding-top:28mm; }
+  .cover .kicker { color:#b3392e; font-weight:700; font-size:10pt; letter-spacing:.5px; margin-bottom:6mm; }
+  .cover h1 { font-size:26pt; font-weight:700; line-height:1.45; margin-bottom:4mm; }
+  .cover .sub { font-size:11.5pt; color:#555b6e; margin-bottom:14mm; }
+  .cover .meta { border-top:2px solid #1c1f2a; padding-top:5mm; font-size:9.5pt; color:#555b6e; margin-bottom:14mm; }
+  .toc { border:1px solid #d8dbe4; border-radius:6px; overflow:hidden; }
+  .toc .trow { display:flex; align-items:center; padding:3.2mm 5mm; border-top:1px solid #e8eaf0; font-size:10pt; }
+  .toc .trow:first-child { border-top:none; }
+  .toc .num { color:#b3392e; font-weight:700; width:9mm; }
+  .toc .name { font-weight:700; flex:1; }
+  .toc .vb { margin-inline-start:auto; }
+
+  /* ── badges ── */
+  .badge { display:inline-block; font-size:8pt; font-weight:700; padding:.8mm 3.2mm; border-radius:99px; white-space:nowrap; }
+  .b-golive   { background:#e3f4e6; color:#186a33; }
+  .b-sell     { background:#e2ecfb; color:#1c4f9c; }
+  .b-fund     { background:#efe4f7; color:#6b2f9c; }
+  .b-warm     { background:#fdf0d7; color:#8a5a00; }
+  .b-decide   { background:#fde8d7; color:#a04a00; }
+  .b-park     { background:#e9eaef; color:#565b69; }
+  .b-synergy  { background:#dcf2ef; color:#0d6b5e; }
+  .b-archive  { background:#f0f0f2; color:#84899a; }
+
+  /* ── sections ── */
+  h2.sec { page-break-before:always; font-size:17pt; font-weight:700; padding-bottom:2.5mm; border-bottom:2.5px solid #1c1f2a; margin-bottom:5mm; }
+  h2.sec .no { color:#b3392e; }
+  h2.first { page-break-before:auto; }
+  .oneliner { font-size:10.5pt; color:#454b5e; margin-bottom:4mm; }
+  h3 { font-size:11pt; font-weight:700; margin:5mm 0 2mm; color:#1c1f2a; }
+  h3 .tick { color:#b3392e; }
+  p { margin-bottom:2.2mm; text-align:justify; }
+  ul,ol { margin:0 6mm 2.5mm 0; }
+  li { margin-bottom:1.2mm; text-align:justify; }
+  b { font-weight:700; }
+
+  table { width:100%; border-collapse:collapse; margin:2mm 0 3.5mm; font-size:8.8pt; }
+  th { background:#1c1f2a; color:#fff; font-weight:700; padding:1.8mm 2.8mm; text-align:right; }
+  td { border:1px solid #dcdfe8; padding:1.7mm 2.8mm; vertical-align:top; }
+  tr:nth-child(even) td { background:#f7f8fb; }
+
+  .idcard { display:flex; gap:3mm; flex-wrap:wrap; background:#f4f5f9; border:1px solid #e2e5ee; border-radius:5px; padding:2.8mm 4mm; margin-bottom:3.5mm; font-size:8.6pt; }
+  .idcard div { white-space:nowrap; }
+  .idcard b { color:#b3392e; }
+
+  .callout { border-right:3.5px solid #b3392e; background:#fbf4f3; padding:2.8mm 4mm; border-radius:4px 0 0 4px; margin:3mm 0; }
+  .callout.green { border-color:#186a33; background:#f2faf4; }
+  .callout.blue { border-color:#1c4f9c; background:#f2f6fd; }
+
+  .kpi { display:flex; gap:3mm; margin:3mm 0; }
+  .kpi .box { flex:1; border:1px solid #dcdfe8; border-radius:5px; padding:2.6mm 3.5mm; }
+  .kpi .box .t { font-size:8pt; color:#7a8095; font-weight:700; }
+  .kpi .box .v { font-size:10.5pt; font-weight:700; }
+  .avoid { page-break-inside:avoid; }
+</style>
+</head>
+<body>
+
+<!-- ══════════ COVER ══════════ -->
+<div class="cover">
+  <div class="kicker">محرمانه · نسخهٔ ۱.۰</div>
+  <h1>سند استراتژی و چشم‌انداز پرتفولیو</h1>
+  <div class="sub">وضعیت امروز، تصمیم برای هر پروژه، و تعریف موفقیت ۹۰ روزه — بر پایهٔ ممیزی مستقیم هر ۱۷ ریپو</div>
+  <div class="meta">
+    مالک: آریا صادقیان &nbsp;·&nbsp; تاریخ: ۲۶ جولای ۲۰۲۶ (۴ مرداد ۱۴۰۵) &nbsp;·&nbsp; دامنه: کل اکانت <span class="ltr">github.com/ariasadeghian</span> + ابزارهای فروش متصل
+  </div>
+  <div class="toc">
+    <div class="trow"><span class="num">۰</span><span class="name">تصویر کلان پرتفولیو</span><span class="vb badge b-park">خلاصه اجرایی</span></div>
+    <div class="trow"><span class="num">۱</span><span class="name">9zero — سیستم اجرای ۹۰ روزهٔ SaaS</span><span class="vb badge b-golive">GO-LIVE همین هفته</span></div>
+    <div class="trow"><span class="num">۲</span><span class="name">FundOps — بک‌آفیس صندوق‌های نوظهور</span><span class="vb badge b-sell">فروش — موتور اصلی درآمد</span></div>
+    <div class="trow"><span class="num">۳</span><span class="name">هم‌تراز — هوش مصنوعی تراز انرژی</span><span class="vb badge b-warm">فقط فرصت گرم</span></div>
+    <div class="trow"><span class="num">۴</span><span class="name">آریا گورمه — فروشندهٔ صوتی + فروشگاه خرما</span><span class="vb badge b-decide">مشروط به کسب‌وکار فیزیکی</span></div>
+    <div class="trow"><span class="num">۵</span><span class="name">ربات معامله‌گر + ترمینال MACRO</span><span class="vb badge b-decide">تصمیم: مسیر هشدار یا پارک</span></div>
+    <div class="trow"><span class="num">۶</span><span class="name">Mirex — پرداخت بیومتریک کف دست</span><span class="vb badge b-fund">فقط جذب سرمایه</span></div>
+    <div class="trow"><span class="num">۷</span><span class="name">FlyingByNothing — پرواز با نیت</span><span class="vb badge b-park">پارک فعال</span></div>
+    <div class="trow"><span class="num">۸</span><span class="name">صندوق پراسپکت (آقای مهیت‌مافی)</span><span class="vb badge b-synergy">هم‌افزایی با FundOps</span></div>
+    <div class="trow"><span class="num">۹</span><span class="name">سایر ریپوها</span><span class="vb badge b-archive">آرشیو / پاک‌سازی</span></div>
+  </div>
+</div>
+
+<!-- ══════════ 0 · BIG PICTURE ══════════ -->
+<h2 class="sec first"><span class="no">۰ ·</span> تصویر کلان پرتفولیو</h2>
+<p><b>سه جمله‌ای که کل این سند را خلاصه می‌کند:</b> پول سریع در <b>9zero</b> است (چند روز تا اولین فروش)، پول جدی در <b>FundOps</b> است (مسیر <span class="ltr">$60k</span> که سرمایهٔ VC را هم آزاد می‌کند)، و پول بزرگ در <b>Mirex</b> است اما از راه سرمایه‌گذار، نه مشتری. بقیهٔ پروژه‌ها یا باید با فرصت‌های گرم جلو بروند یا آگاهانه پارک شوند — پراکندگی تمرکز، بزرگ‌ترین ریسک این پرتفولیو است.</p>
+
+<table>
+  <tr><th>رتبه</th><th>پروژه</th><th>فاصله تا اولین پول</th><th>مقیاس پول</th><th>تصمیم</th></tr>
+  <tr><td>۱</td><td><b>9zero</b></td><td>چند روز</td><td><span class="ltr">$79 – $2,500</span> per deal؛ هدف ماه اول <span class="ltr">$1.6–3.2k</span></td><td>همین هفته لایو شود</td></tr>
+  <tr><td>۲</td><td><b>FundOps</b></td><td>۲–۶ هفته</td><td><span class="ltr">$3,500</span> per deal؛ مسیر <span class="ltr">$68k ARR</span> با ۵–۶ مشتری</td><td>موتور اصلی ۹۰ روز آینده</td></tr>
+  <tr><td>۳</td><td><b>هم‌تراز</b></td><td>۲–۴ هفته (فقط با معرفی گرم)</td><td>اسپرینت تشخیص با ۵۰٪ پیش‌پرداخت ریالی</td><td>فقط تماس گرم؛ ساخت ممنوع</td></tr>
+  <tr><td>۴</td><td><b>آریا گورمه</b></td><td>~۱ ماه (شرط: زنجیرهٔ تأمین فعال)</td><td>فروش محصول فیزیکی (خرما)</td><td>تصمیم مالکیتی، بعد راه‌اندازی تلفنی</td></tr>
+  <tr><td>۵</td><td><b>ربات معامله‌گر</b></td><td>۱–۳ ماه (فقط مرحلهٔ هشدار)</td><td>اشتراک سیگنال</td><td>یک تصمیم شفاف: برو یا پارک</td></tr>
+  <tr><td>۶</td><td><b>Mirex</b></td><td>۹–۱۲ ماه پس از جذب سرمایه</td><td>بازار بزرگ؛ نیازمند سید</td><td>فریز مهندسی؛ جلسات سرمایه</td></tr>
+  <tr><td>۷</td><td><b>FlyingByNothing</b></td><td>چند سال (رگولاتوری)</td><td>—</td><td>پارک؛ فقط LOI فرصتی</td></tr>
+  <tr><td>۸</td><td><b>صندوق پراسپکت</b></td><td>—</td><td>غیرمستقیم (مشتری FundOps)</td><td>یک دمو بگذار</td></tr>
+</table>
+
+<h3><span class="tick">■</span> سه قاعدهٔ پرتفولیو (تا ۹۰ روز آینده)</h3>
+<ol>
+  <li><b>قاعدهٔ تمرکز ۷۰/۲۰/۱۰:</b> ~۷۰٪ وقتِ آزاد به FundOps (فروش روزانه) + دنبالهٔ go-live 9zero؛ ~۲۰٪ به جلسات سرمایهٔ Mirex؛ ~۱۰٪ فرصتی (تماس گرم هم‌تراز، دموی صندوق پراسپکت). هیچ پروژهٔ جدیدی شروع نمی‌شود.</li>
+  <li><b>قاعدهٔ «ساختن تمام شده»:</b> در 9zero و FundOps گلوگاه دیگر کد نیست — «فرستادن» است. هر ساعت مهندسیِ اضافه روی این دو، از چت‌های پروژه (Claude) خریده می‌شود، نه از وقت تو.</li>
+  <li><b>قاعدهٔ صداقت:</b> هیچ عدد، نقل‌قول یا قابلیت تأییدنشده‌ای در هیچ متریال عمومی هیچ پروژه‌ای منتشر نمی‌شود. (این قانون در اسناد داخلی خودت هم هست — و در فروش B2B مالی، خودش مزیت رقابتی است.)</li>
+</ol>
+
+<div class="callout blue avoid"><b>ابزارهای فروش متصل و نقششان:</b> Apollo.io (ساخت لیست GP برای FundOps و فاندرهای SaaS برای 9zero)، Gmail/Calendar (اجرای outreach و بوکینگ)، بات فروشندهٔ «رضا» (لایوِ 9zero — روزانه draft می‌سازد)، کیت‌های فروش داخل ریپوها (FundOps ،9zero، هم‌تراز، Flying — همه ساخته و آماده).</div>
+
+<!-- ══════════ 1 · 9ZERO ══════════ -->
+<h2 class="sec"><span class="no">۱ ·</span> 9zero <span class="badge b-golive">GO-LIVE همین هفته</span></h2>
+<div class="oneliner">سیستم اجرای ۹۰ روزه برای تیم‌های B2B SaaS بین MVP و مقیاس (۶–۶۰ نفر) — «ریتم عملیاتی بالای task tracker»، تحویل داخل Notion خود مشتری.</div>
+<div class="idcard">
+  <div>ریپو: <b>9-zero</b></div><div>آخرین فعالیت: <b>۲۶ جولای (امروز)</b></div><div>مقیاس: <b>۲۱۶ فایل، ۳ بات، سایت، ماشین فروش</b></div><div>مشتری پولی: <b>۰</b></div>
+</div>
+
+<h3><span class="tick">■</span> چشم‌انداز</h3>
+<p>محصولِ «ریتم» برای تیم‌هایی که برای EOS کوچک‌اند (<span class="ltr">$4,500</span> به‌ازای هر جلسه) و برای تمپلیت خالی <span class="ltr">$29–97</span> جدی — حفرهٔ وسط بازار که الان خالی است. نردبان: تمپلیت <span class="ltr">$79</span> ← نصب <span class="ltr">$950</span> ← اسپرینت تسهیل‌شده <span class="ltr">$2,500</span> ← رتینر ماهانه <span class="ltr">$200–500</span>. چشم‌انداز ۱۲ ماهه: یک محصول Notion-first با درآمد تکرارشونده و بات تلگرام به‌عنوان لایهٔ enforcement — چیزی که رقبا ندارند.</p>
+
+<h3><span class="tick">■</span> وضعیت الان (ممیزی‌شده)</h3>
+<ul>
+  <li>✅ همهٔ دارایی‌ها ساخته شده: محصول (ورک‌اسپیس زندهٔ Notion + اسکریپت provisioning هر مشتری)، ۳ بات تلگرام، لندینگ و دمو، کیت لانچ Gumroad، پلی‌بوک تحویل ۹۰ روزه، کیت fundraising.</li>
+  <li>✅ اتوماسیون فروش زنده است: «رضا — autonomous agent» با schedule دو کادنسی ۷ روز هفته اجرا می‌شود؛ اجراهای زمان‌بندی‌شده سبزند و secrets ست شده‌اند. باگ مهلک اولین اجرا هم fix و merge شده.</li>
+  <li>✅ PDFهای فروش (ops-manual / one-pager / pricing) ساخته و تک‌صفحه شده‌اند؛ برنچ‌های معلق merge شده‌اند.</li>
+  <li>❌ دیپلوی GitHub Pages از ۸ جولای هربار fail می‌شود — علت قطعی: Pages در Settings فعال نشده (خطای <span class="ltr">configure-pages: Resource not accessible</span>). فیکس: ۲ کلیک + Re-run.</li>
+  <li>❌ هر ۱۵ سؤال <span class="ltr">QUESTIONS_FOR_FOUNDER.md</span> بی‌جواب — تکلیف نقل‌قول‌های لندینگ و متریک‌های دک روشن نیست؛ بلاک‌کنندهٔ انتشارِ صادقانه.</li>
+  <li>❌ مسیر پول هنوز وصل نیست: تمپلیت عمومی Notion ساخته نشده، Gumroad و Cal.com وجود ندارند.</li>
+</ul>
+
+<h3><span class="tick">■</span> استراتژی — چه کنیم</h3>
+<p><b>لانچ کامل در همین هفته؛ هیچ ساختِ جدیدی مجاز نیست.</b> ترتیب: اول جواب Q1/Q2 (یا اعمال گزینهٔ امن حذف attribution)، بعد فعال‌کردن Pages، بعد ساخت تمپلیت <span class="ltr">$79</span> و اتصال Gumroad، بعد موج اول توزیع (پست لانچ + ۱۵ ایمیل سرد آماده + ۵ پیام گرم). رضا از قبل سوخت روزانه می‌دهد. چک‌لیست کامل ۲۴ قدمی در <span class="ltr">9ZERO_GOLIVE_CHECKLIST_FA.md</span> و دستورکار رفع اشکال در <span class="ltr">9ZERO_FIX_HANDOFF_FA.md</span> موجود است.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">۷ روزه</div><div class="v">لینک خرید زنده + اولین فروش تمپلیت</div></div>
+  <div class="box"><div class="t">۳۰ روزه</div><div class="v"><span class="ltr">$1,600–3,200</span> + اولین testimonial</div></div>
+  <div class="box"><div class="t">۹۰ روزه</div><div class="v">۱۰+ مشتری، شروع رتینر، دادهٔ conversion برای روایت venture</div></div>
+</div>
+
+<!-- ══════════ 2 · FUNDOPS ══════════ -->
+<h2 class="sec"><span class="no">۲ ·</span> FundOps <span class="badge b-sell">فروش — موتور اصلی درآمد</span></h2>
+<div class="oneliner">بک‌آفیس ایجنتیک برای مدیران صندوق نوظهور و سندیکتورهای SPV (<span class="ltr">$5–50M</span>) در خلیج (DIFC/ADGM/عمان) و بریتانیا — جایگزین سرویس‌های <span class="ltr">$40–100k</span> در سال.</div>
+<div class="idcard">
+  <div>ریپو: <b>fintech-fund-</b></div><div>آخرین فعالیت: <b>۲۴ جولای</b></div><div>مقیاس: <b>۵۳ تست، Sandbox و Pricing لایو در کد</b></div><div>اهرم: <b>مایل‌استون <span class="ltr">$60k</span> از VC</b></div>
+</div>
+
+<h3><span class="tick">■</span> چشم‌انداز</h3>
+<p>«کاکپیت self-administration سمتِ GP» — در جغرافیایی که هیچ نرم‌افزار رقیبی ندارد (GCC) و سگمنتی که رقبا رهایش کرده‌اند (میکروفاندهای اول‌فاند). سه اصل معماری که خودشان پیام فروش‌اند: پولِ قطعی (موتور تست‌شدهٔ deterministic، نه LLM)، تأیید انسانی روی هر خروجی، بدون custody. چشم‌انداز ۱۲ ماهه: استاندارد عملیات صندوق‌های کوچک منطقه + تیر premium عربی RTL که هیچ رقیبی نمی‌تواند کپی کند.</p>
+
+<h3><span class="tick">■</span> وضعیت الان (ممیزی‌شده)</h3>
+<ul>
+  <li>✅ محصول V1 کامل و دموپذیر: capital call تا انتها، گزارش فصلی LP، ایمپورت CSV، ردگیری audit؛ دموی seed تمیز. Sandbox (<span class="ltr">/sandbox</span>) و صفحهٔ قیمت ساخته و E2E تست شده‌اند — دمو دیگر به حضور فاندر وابسته نیست.</li>
+  <li>✅ کیت فروش کامل: دک، one-pager، LOI، قرارداد پایلوت، datasheet امنیتی، سکانس‌های پیگیری 0/2/6/11، لیست ۴۵ هدف تحقیق‌شده (از جمله ۱۰ صندوق کوهورت BBB که به اولین callشان نزدیک‌اند)، پلن ۶۰k و اسپرینت دوهفته‌ای.</li>
+  <li>✅ سند استراتژی چندعاملی (<span class="ltr">STRATEGY-FAST-REVENUE</span>): گُوِهٔ «First Capital Call, Done Right» با <span class="ltr">$3,500</span> پیش‌پرداخت کامل؛ قانون «یک گُوِه، دو جغرافیا، یک CTA».</li>
+  <li>❌ آیتم‌های ۲–۷ صف ساخت هنوز در کد نیستند (register-diff، لینک پرداخت، پک close حسابرس، عربی RTL، ران‌بوک provisioning، magic-link) — به چت پروژه سپرده شده.</li>
+  <li>❌ اقدامات «فقط فاندر» مانده: پرسش تعریف <span class="ltr">$60k</span> از VC، دیپلوی رایگان HF، پروفایل LinkedIn، لینک بوکینگ، و ۹۰ دقیقه فروش روزانه. مشتری و سیگنال بازار: هنوز صفر.</li>
+</ul>
+
+<h3><span class="tick">■</span> استراتژی — چه کنیم</h3>
+<p><b>این پروژه موتور درآمد ۹۰ روز آینده است؛ همه‌چیز تابع اسپرینت سیگنال دوهفته‌ای.</b> امروز: ایمیل یک‌خطی به VC (ARR یا نقد وصولی؟ تا کی؟) + راه‌اندازی روز صفر (~۲ ساعت). سپس ریتم ۹۰ دقیقه‌ای ۶ روز هفته: ۳ پیام «نگاه/معرفی» به آشناها + ۵ پیام سرد تریگردار (CTA همه: لینک Sandbox) + پیگیری‌ها. روز ۱۴ معیار سیگنال؛ هفتهٔ ۳ هدف: ۲ پک <span class="ltr">$3,500</span> وصول‌شده + ۱ صندلی founding؛ اگر عقب بود، بیمهٔ Fractional CFO فعال و وزن کامل به GCC. ریاضی: ۲ صندلی founding + ۳ تبدیل پک←اشتراک = <span class="ltr">$68.4k ARR</span>. خط قرمزها: هیچ لید US، هیچ white-label به adminها فعلاً، هیچ UI برای IRR/waterfall، هیچ سند هویتی واقعی LP تا رمزنگاری at-rest.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">روز ۱۴</div><div class="v">≥۳ مکالمهٔ جدی یا ≥۱ آپلود CSV واقعی یا ≥۱ دمو</div></div>
+  <div class="box"><div class="t">هفته ۳–۴</div><div class="v">۲ پک وصول‌شده + ۱ founding</div></div>
+  <div class="box"><div class="t">ماه ۴–۵</div><div class="v"><span class="ltr">$60k</span> پاس → سرمایهٔ VC</div></div>
+</div>
+
+<!-- ══════════ 3 · HAMTARAZ ══════════ -->
+<h2 class="sec"><span class="no">۳ ·</span> هم‌تراز (Hamtaraz) <span class="badge b-warm">فقط فرصت گرم</span></h2>
+<div class="oneliner">مغز هوش مصنوعی برای تراز انرژی: پیش‌بینی پیک مصرف هر بخش، تشخیص ناترازی قبل از وقوع، بازتوزیع هوشمند — «اول بارِ حیاتی». به‌علاوهٔ لایهٔ بهینه‌سازی دیتاسنتر.</div>
+<div class="idcard">
+  <div>ریپو: <b>energyaistartup</b></div><div>آخرین فعالیت: <b>۲۰ جولای</b></div><div>مقیاس: <b>مستندات کامل + شبیه‌ساز + GUI + کیت فروش</b></div><div>مشتری: <b>۰</b></div>
+</div>
+
+<h3><span class="tick">■</span> چشم‌انداز</h3>
+<p>«خودران، برای شبکهٔ برق»: انسان فقط سیاست را تعیین می‌کند (چه چیزی حیاتی است)، سیستم پیچیدگی پیش‌بینی و توزیع را پنهان می‌کند. بازار بلندمدت: اپراتورهای شبکه، نیروگاه‌ها و دیتاسنترها در منطقه‌ای که ناترازی ساختاری واقعیت روزمره است. این چشم‌انداز درست و بزرگ است — اما چرخهٔ فروشش (زیرساخت حیاتی، دولتی/شبه‌دولتی) چندساله است.</p>
+
+<h3><span class="tick">■</span> وضعیت الان</h3>
+<ul>
+  <li>✅ مستندسازی حرفه‌ای (چشم‌انداز، معماری، ایمنی، نقشهٔ راه)، شبیه‌ساز کارا، GUI اتاق کنترل با انبوردینگ، CI سبز.</li>
+  <li>✅ <b>کیت «اسپرینت تشخیص»</b> — هوشمندترین قطعهٔ پروژه: قیف کوتاهِ «تماس گرم ← CSV کنتور مشتری ← گزارش تشخیصی خودکار (<span class="ltr">diagnostic.py</span>) ← SOW یک‌صفحه‌ای با ۵۰٪ پیش‌پرداخت ← تحویل گزارش» با اسکریپت تماس فارسی، فاکتور ریالی و نمونه‌گزارش آماده.</li>
+  <li>❌ هیچ پایلوت، مشتری یا حتی مکالمهٔ ثبت‌شده‌ای وجود ندارد؛ محصول اصلی بدون دادهٔ واقعی شبکه قابل اثبات نیست.</li>
+</ul>
+
+<h3><span class="tick">■</span> استراتژی — چه کنیم</h3>
+<p><b>حالت فرصت‌محور: هیچ‌چیز جدیدی ساخته نمی‌شود؛ فقط کیت موجود روی معرفی‌های گرم شلیک می‌شود.</b> اگر ۲–۳ رابطهٔ گرم در صنایع/دیتاسنتر/انرژی داری، با اسکریپت آماده تماس بگیر؛ اولین پول = اسپرینت تشخیص با ۵۰٪ پیش‌پرداخت (خدماتی، ولی هر گزارش هم مرجع فروش بعدی است هم دادهٔ واقعی برای محصول). اگر معرفی گرم نیست، پروژه در پارک می‌ماند تا FundOps و 9zero جا بیفتند. تنها استثنا: اگر یک فرصت دیتاسنتری جدی پیدا شد، لایهٔ DC (سند ۰۷) را جلو بیاور — چرخهٔ فروش خصوصی کوتاه‌تر از شبکهٔ برق است.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">۳۰ روزه</div><div class="v">۲–۳ تماس گرم انجام‌شده (اگر رابطه بود)</div></div>
+  <div class="box"><div class="t">۹۰ روزه</div><div class="v">۱–۲ اسپرینت تشخیصِ پول‌گرفته + دادهٔ واقعی اولین مشتری</div></div>
+  <div class="box"><div class="t">شرط ادامه</div><div class="v">بدون سیگنال گرم = پارک بدون عذاب وجدان</div></div>
+</div>
+
+<!-- ══════════ 4 · ARIA GOURMET ══════════ -->
+<h2 class="sec"><span class="no">۴ ·</span> آریا گورمه <span class="badge b-decide">مشروط به کسب‌وکار فیزیکی</span></h2>
+<div class="oneliner">عامل فروش صوتی فارسی که تلفنی زنگ می‌زند و خرمای آریا را می‌فروشد (چندخط هم‌زمان) + سایت فروشگاهی استاتیک.</div>
+<div class="idcard">
+  <div>ریپوها: <b>aria-gourmet- · ariagourmet · ariagourmetfoodceo</b></div><div>آخرین فعالیت: <b>۲۴ جولای</b></div><div>مقیاس: <b>۴۶ تست سبز، دایلر چندخطی، داشبورد RTL</b></div>
+</div>
+
+<h3><span class="tick">■</span> چشم‌انداز</h3>
+<p>کوتاه‌مدت: ضریب فروشِ کسب‌وکار خرما — ۱۰ خط هم‌زمان که مثل فروشندهٔ انسانی مذاکره می‌کنند و سفارش می‌گیرند. بلندمدت (اختیاری): همین موتور به‌عنوان «فروشندهٔ صوتی فارسی برای SMEهای ایرانی» به‌صورت سرویس — ولی فقط بعد از اینکه روی کیس خودمان اثبات شد.</p>
+
+<h3><span class="tick">■</span> وضعیت الان</h3>
+<ul>
+  <li>✅ مغز فروش (اسکریپت، مدیریت اعتراض، خروجی ساختاریافتهٔ تماس)، STT/TTS، پایپ‌لاین صوتی با barge-in، دایلر چندخطی با محافظ‌های تولیدی، داشبورد گزارش، نصب systemd — همه آماده و تست‌شده. بدون کلید API هم در حالت شبیه‌ساز قابل نمایش است.</li>
+  <li>⚠️ لایهٔ تلفنی (Asterisk/AudioSocket) کدش آماده ولی <b>روی سخت‌افزار واقعی تست نشده</b> — طبق HANDOVER به مدیر فنی و ۱–۲ هفته راه‌اندازی نیاز دارد (خط SIP، کلیدهای LLM/TTS).</li>
+  <li>⚠️ سایت فروشگاه (ariagourmet) آمادهٔ انتشار روی Liara است ولی وضعیت انتشار و اتصالش به عملیات واقعی فروش نامشخص است. ariagourmetfoodceo فقط placeholder است.</li>
+</ul>
+
+<h3><span class="tick">■</span> استراتژی — چه کنیم</h3>
+<p><b>اینجا تصمیمْ فنی نیست، مالکیتی است:</b> درآمد این پروژه از فروش خرماست، نه از کد. سؤال تعیین‌کننده: آیا زنجیرهٔ تأمین (محصول، قیمت، ارسال، شماره‌های هدف) فعال و آمادهٔ جذب سفارش است؟ <b>اگر بله:</b> یک مدیر فنی/فریلنسر برای راه‌اندازی تلفنی بیاور (سند HANDOVER دقیقاً برای همین نوشته شده)، با ۱–۲ خط و یک کمپین ۱۰۰ تماسهٔ آزمایشی شروع کن، سایت را منتشر کن، و نرخ تبدیل را اندازه بگیر. <b>اگر نه:</b> پروژه را صادقانه پارک کن — کد جایی نمی‌رود و ارزشش حفظ می‌شود. وسوسهٔ «سرویس عمومی voice-agent» را تا قبل از اثبات روی کیس خودت کنار بگذار.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">تصمیم (این هفته)</div><div class="v">بله/خیرِ زنجیرهٔ تأمین ثبت شود</div></div>
+  <div class="box"><div class="t">۳۰ روزه (اگر بله)</div><div class="v">تلفنی زنده + ۱۰۰ تماس آزمایشی</div></div>
+  <div class="box"><div class="t">۹۰ روزه (اگر بله)</div><div class="v">کمپین پایدار + نرخ تبدیل اندازه‌گیری‌شده + اولین سفارش‌های تکراری</div></div>
+</div>
+
+<!-- ══════════ 5 · TRADING ══════════ -->
+<h2 class="sec"><span class="no">۵ ·</span> ربات معامله‌گر + ترمینال MACRO <span class="badge b-decide">تصمیم: مسیر هشدار یا پارک</span></h2>
+<div class="oneliner">پلتفرم کامل ربات معامله (میراث Coinlocally: میکروسرویس‌های .NET + فرانت React) + ترمینال تحلیلی بدون‌وابستگی مکرو/کریپتو + بات چندعاملی پایتونی و استراتژی Pine.</div>
+<div class="idcard">
+  <div>ریپوها: <b>tradingbotforbtcandau · dataset-file (عمومی)</b></div><div>آخرین فعالیت: <b>۲۴ جولای</b></div><div>مقیاس: <b>۱۰۳۱ + ۱۳۴ فایل؛ PDFهای مدل کسب‌وکار فارسی</b></div>
+</div>
+
+<h3><span class="tick">■</span> چشم‌انداز</h3>
+<p>سرویس سیگنال/هشدار (و در بلندمدت اجرای خودکار) برای جامعهٔ معامله‌گر فارسی‌زبان — با ویترین رایگان «ترمینال MACRO» به‌سبک بلومبرگ که در چند دقیقه دیپلوی می‌شود و خوراک اعتمادسازی است.</p>
+
+<h3><span class="tick">■</span> وضعیت الان</h3>
+<ul>
+  <li>✅ معماری بک‌اند کامل (استراتژی‌ها، بک‌تست، اجرای سفارش، RabbitMQ/Redis/SQL Server) + ران‌بوک Go-Live مرحله‌بندی‌شده؛ مرحلهٔ A (فقط هشدار، بدون پول واقعی) فقط Docker می‌خواهد.</li>
+  <li>✅ ترمینال MACRO مستقل و بدون وابستگی، با استقرار دقیقه‌ای؛ دادهٔ خراب را «unavailable» نشان می‌دهد نه عدد جعلی.</li>
+  <li>❌ سه مانع جدی برای محصول کامل: secrets واقعیِ لورفته در سورس تحویلی که باید در مبدأ rotate شوند؛ وابستگی فرانت به پکیج خصوصی <span class="ltr">@coinlocally/cly-core</span> که در دسترس نیست؛ مسیر اجرای معاملهٔ واقعی ناتمام.</li>
+  <li>⚠️ ریسک ذاتی: مسئولیت مالی/رگولاتوری سیگنال‌فروشی و اعتمادسازی در بازاری پر از سرویس‌های بی‌کیفیت.</li>
+</ul>
+
+<h3><span class="tick">■</span> استراتژی — چه کنیم</h3>
+<p><b>یک تصمیم شفاف بگیر و ثبتش کن — بدترین حالت، ماندن در برزخ است.</b> <b>گزینهٔ الف (مسیر کم‌ریسک):</b> فقط مرحلهٔ A — ترمینال MACRO را منتشر کن (ویترین/lead magnet)، موتور هشدار را روی دادهٔ عمومی بالا بیاور، و اشتراک سیگنال را با قیمت پایین به کامیونیتی فارسی تست کن؛ قبل از هر انتشار، rotate کامل secrets. فرانت اختصاصی نساز — کانال تلگرام + ترمینال کافی است. <b>گزینهٔ ب:</b> پارک رسمی تا بعدِ تثبیت FundOps — با یادداشت وضعیت در README تا دوباره «کشفش» نکنی. <b>توصیهٔ این سند: گزینهٔ ب</b>، مگر اینکه وقت هفتگی واقعاً آزاد داشته باشی؛ چون همین الان دو موتور درآمدی فعال داری و این سومی تمرکز را می‌شکند.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">این هفته</div><div class="v">تصمیم الف/ب مکتوب شود</div></div>
+  <div class="box"><div class="t">اگر الف — ۳۰ روزه</div><div class="v">rotate کامل + ترمینال منتشر + هشدار زنده</div></div>
+  <div class="box"><div class="t">اگر الف — ۹۰ روزه</div><div class="v">۱۰ مشترک پولی اول سیگنال</div></div>
+</div>
+
+<!-- ══════════ 6 · MIREX ══════════ -->
+<h2 class="sec"><span class="no">۶ ·</span> Mirex <span class="badge b-fund">فقط جذب سرمایه</span></h2>
+<div class="oneliner">پرداخت بیومتریک کف دست (مدل Amazon One) برای خاورمیانه: اسکنر <span class="ltr">$55</span>، اپ مشتری و پذیرنده، کیف پول و لجر، سرویس بازشناسی.</div>
+<div class="idcard">
+  <div>ریپوها: <b>mirex-by-claude</b> (+ آرشیو: consumer · merchants · mirex)</div><div>آخرین فعالیت: <b>۲۶ جولای (فعال‌ترین ریپو)</b></div><div>مقیاس: <b>۲۰۰+ تست، ۵ زیرسیستم، دک + مدل مالی</b></div>
+</div>
+
+<h3><span class="tick">■</span> چشم‌انداز</h3>
+<p>«با کف دستت پرداخت کن» — شبکهٔ پرداخت بیومتریک برای ریتیل خلیج (امارات/عربستان) با معماری edge+server هم‌ردهٔ Amazon One و PalmSecure ولی با BOM <span class="ltr">$55</span>. بزرگ‌ترین چشم‌انداز پرتفولیو؛ و به همان نسبت، سرمایه‌برترین.</p>
+
+<h3><span class="tick">■</span> وضعیت الان</h3>
+<ul>
+  <li>✅ حجم مهندسی چشمگیر و صادقانه مستندشده: بک‌اند Django امن (۲۰۰+ تست)، سرویس بیومتریک FastAPI، اپ‌های Next.js، نرم‌افزار اسکنر Pi، سایت مارکتینگ، معماری edge (آپلود ~۱۵KB به‌جای ~۱MB — استدلال GDPR/رگولاتور)، داشبورد Biometric Intelligence با ابزار Try-it برای جلسهٔ سرمایه‌گذار.</li>
+  <li>✅ متریال سرمایه کامل: دک، مدل مالی ۳ ساله، بریف و آپدیت‌های ماهانهٔ سرمایه‌گذار (فارسی/انگلیسی)، BOM و اسپک سخت‌افزار.</li>
+  <li>❌ گلوگاه‌ها به اعتراف اسناد خود پروژه: مدل بازشناسی هنوز آموزش ندیده (GPU + دادهٔ واقعی کف دست می‌خواهد)، دیپلوی production نشده، هیچ پذیرنده/کاربر واقعی نیست، سخت‌افزار مونتاژ نشده، KYC و درگاه پرداخت وصل نیست. اولین درآمد: ۹–۱۲ ماه بعد از سید.</li>
+  <li>ℹ️ ریپوهای consumer/merchants (فرانت‌های فریلنسری ۲۰۲۳–۲۰۲۴) توسط باندل فعلی منسوخ‌اند؛ mirex فقط placeholder است.</li>
+</ul>
+
+<h3><span class="tick">■</span> استراتژی — چه کنیم</h3>
+<p><b>فریز مهندسی؛ ۱۰۰٪ انرژی این پروژه به جلسهٔ سرمایه.</b> متریال از الان investor-ready است — هر هفتهٔ مهندسیِ بیشتر، بدون پول و دادهٔ واقعی، بازده نزولی دارد. برنامه: لیست ۱۵–۲۰ سرمایه‌گذار سید منطقه (فینتک/deep-tech خلیج) + فرشتگان صنعت پرداخت؛ روایت جلسه حول سه چیز: دموی ۵ ثانیه‌ای end-to-end، داشبورد Try-it، و صداقت رادیکال گزارش‌ها (ریسک باز: آموزش مدل). مصرف سید: آموزش مدل + پایلوت ۵–۱۰ پذیرنده + KYC امارات/عربستان. مسیر موازی کم‌هزینه: یک LOI از یک شریک استراتژیک ریتیل/پرداخت که قصهٔ fundraise را قوی‌تر می‌کند. <b>موفقیت FundOps بهترین دوست Mirex است</b> — هم درآمد شخصی می‌سازد هم اعتبار founder را در همان جغرافیا.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">۳۰ روزه</div><div class="v">≥۲ جلسهٔ سرمایه‌گذار برگزارشده</div></div>
+  <div class="box"><div class="t">۹۰ روزه</div><div class="v">پایپ‌لاین فعال سید یا ۱ LOI شریک استراتژیک</div></div>
+  <div class="box"><div class="t">ضدهدف</div><div class="v">هیچ اسپرینت مهندسی جدید تا بستن سرمایه</div></div>
+</div>
+
+<!-- ══════════ 7 · FLYING ══════════ -->
+<h2 class="sec"><span class="no">۷ ·</span> FlyingByNothing <span class="badge b-park">پارک فعال</span></h2>
+<div class="oneliner">پرواز هلیکوپترهای کوچک تفریحی برای غیرخلبان‌ها: کاربر فقط «قصد» را می‌گوید، مدیر پرواز هوشمند ایمنی و پیچیدگی را برعهده می‌گیرد — «خودران، برای آسمان».</div>
+<div class="idcard">
+  <div>ریپو: <b>flyingbynothing</b></div><div>آخرین فعالیت: <b>۲۱ جولای</b></div><div>مقیاس: <b>مستندات + شبیه‌ساز + دموی پهپاد Tello + کیت BD</b></div>
+</div>
+
+<h3><span class="tick">■</span> چشم‌انداز و وضعیت</h3>
+<p>چشم‌انداز الهام‌بخش و مستندسازی (ایمنی، معماری، HIL، نقشهٔ راه) جدی است؛ شبیه‌ساز و دموی وب و کنترل پهپاد واقعی Tello کار می‌کنند؛ کیت BD (تمپلیت LOI، ۱۰ هدف اول، پلی‌بوک outreach) آماده است. اما مسیر گواهی‌نامهٔ هوانوردی چندساله و سرمایه‌بر است و هیچ درآمد نقدی کوتاه‌مدتی وجود ندارد — حداکثر خروجی نزدیک: LOI شریک صنعتی.</p>
+
+<h3><span class="tick">■</span> استراتژی — چه کنیم</h3>
+<p><b>پارک فعال:</b> هیچ ساخت و هیچ outreach فعالی. فقط اگر فرصت گرمِ اتفاقی پیش آمد (سازندهٔ هلیکوپتر سبک، شرکت آوینیکس، برنامهٔ دانشگاهی)، از کیت آماده برای یک LOI غیرالزام‌آور استفاده کن. بازبینی بعدی: بعد از بسته‌شدن سرمایهٔ Mirex یا پاس‌شدن <span class="ltr">$60k</span> فاندآپس — هر کدام زودتر.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">۹۰ روزه</div><div class="v">صفر ساعت مصرف‌شده (موفقیت = انضباط)</div></div>
+  <div class="box"><div class="t">فرصتی</div><div class="v">۱ LOI شریک صنعتی، فقط اگر گرم بود</div></div>
+  <div class="box"><div class="t">بازبینی</div><div class="v">بعد از سرمایهٔ Mirex یا <span class="ltr">$60k</span> فاندآپس</div></div>
+</div>
+
+<!-- ══════════ 8 · PROSPECT ══════════ -->
+<h2 class="sec"><span class="no">۸ ·</span> صندوق پراسپکت (آقای مهیت‌مافی و شرکا) <span class="badge b-synergy">هم‌افزایی با FundOps</span></h2>
+<div class="oneliner">ساختار سازمانی یک صندوق VC (گاورننس، دیل‌فلو، پرتفولیو، مالی، روابط سرمایه‌گذاران) — سند/فولدر، نه محصول.</div>
+<div class="idcard">
+  <div>ریپو: <b>prospectventurefundproject-...</b></div><div>آخرین فعالیت: <b>۵ ژوئن</b></div><div>ماهیت: <b>پروژهٔ همکاری/خدماتی</b></div>
+</div>
+
+<h3><span class="tick">■</span> وضعیت و استراتژی</h3>
+<p>این ریپو محصول نیست، اما <b>هم‌افزایی طلایی دارد:</b> هر پوشه‌ای که این ساختار تعریف کرده (capital call، گزارش LP، NAV، گزارش فصلی) دقیقاً همان کاری است که FundOps به‌صورت نرم‌افزار انجام می‌دهد. اقدام: یک دموی ۲۰ دقیقه‌ای FundOps برای آقای مهیت‌مافی و شرکا بگذار — با دو هدف: (۱) تبدیل‌شدن به design partner (پایلوت پولی یا حتی رایگانِ مشروط به testimonial و دادهٔ واقعی)، (۲) فیدبک عملیاتی از یک GP واقعی فارسی‌زبان. اگر صندوق در جغرافیای هدف (DIFC/ADGM/عمان) ثبت می‌شود، می‌تواند اولین لوگوی منطقه‌ای شود. اگر همکاری شکل نگرفت، ریپو بدون هزینه در جای خودش می‌ماند.</p>
+
+<h3><span class="tick">■</span> تعریف موفقیت</h3>
+<div class="kpi avoid">
+  <div class="box"><div class="t">۱۴ روزه</div><div class="v">۱ جلسهٔ دموی FundOps برگزار شود</div></div>
+  <div class="box"><div class="t">۹۰ روزه</div><div class="v">تبدیل به design partner یا بستهٔ محترمانهٔ پرونده</div></div>
+</div>
+
+<!-- ══════════ 9 · OTHERS ══════════ -->
+<h2 class="sec"><span class="no">۹ ·</span> سایر ریپوها <span class="badge b-archive">آرشیو / پاک‌سازی</span></h2>
+<table>
+  <tr><th>ریپو</th><th>چیست</th><th>تصمیم</th></tr>
+  <tr><td><b>makair</b></td><td>فورک پروژهٔ متن‌باز ونتیلاتور (مرجع/الهام). اسناد استراتژی این پرتفولیو فعلاً روی برنچ کاری همین ریپو نگه‌داری می‌شوند.</td><td>نگه‌دار به‌عنوان مرجع؛ در صورت تمایل، اسناد استراتژی را بعداً به یک ریپوی خصوصی «HQ» منتقل کن.</td></tr>
+  <tr><td><b>mirex</b></td><td>Placeholder رسمی نام (README + LICENSE) — به mirex-by-claude ارجاع می‌دهد.</td><td>نگه‌دار (رزرو نام)؛ دست نزن.</td></tr>
+  <tr><td><b>consumer · merchants</b></td><td>فرانت‌های فریلنسری قدیمی Mirex (۲۰۲۳–۲۰۲۴)، منسوخ‌شده توسط باندل فعلی.</td><td>آرشیو (Archive در GitHub) با یک خط README: «superseded by mirex-by-claude».</td></tr>
+  <tr><td><b>revbyads</b></td><td>فقط README — ایده‌ای اجرا‌نشده (درآمد از تبلیغات).</td><td>حذف یا آرشیو؛ ایده اگر جدی شد، اول یک صفحه سند، بعد ریپو.</td></tr>
+  <tr><td><b>findingajobobread</b></td><td>فقط README — placeholder جست‌وجوی شغل.</td><td>تصمیم شخصی: اگر مسیر درآمد پشتیبان (شغل/قرارداد) فعال است، جدا از این پرتفولیو مدیریتش کن؛ وگرنه حذف.</td></tr>
+  <tr><td><b>ariagourmetfoodceo</b></td><td>فقط README.</td><td>ادغام در پروژهٔ آریا گورمه یا حذف.</td></tr>
+</table>
+<p>منطق پاک‌سازی: اکانتی که قرار است سرمایه‌گذار و مشتری ببینند، باید همان قصهٔ تمرکز را بگوید که این سند می‌گوید — چند پروژهٔ زنده با وضعیت روشن، نه ۱۷ ریپو با placeholder های تصادفی.</p>
+
+<h3><span class="tick">■</span> تقویم ۳۰ روزهٔ کلان (جمع‌بندی اجرایی)</h3>
+<table class="avoid">
+  <tr><th>هفته</th><th>9zero</th><th>FundOps</th><th>بقیه</th></tr>
+  <tr><td><b>۱</b></td><td>جواب Q1/Q2 ← فعال‌سازی Pages ← تمپلیت + Gumroad ← پست لانچ + ۱۵ ایمیل + ۵ پیام گرم</td><td>ایمیل تعریف <span class="ltr">$60k</span> به VC + راه‌اندازی روز صفر + شروع ریتم ۹۰ دقیقه‌ای + پرامپت به چت پروژه</td><td>تصمیم آریا گورمه و ربات معامله‌گر مکتوب شود</td></tr>
+  <tr><td><b>۲</b></td><td>پاسخ به replyها؛ رضا روزانه سوخت می‌دهد</td><td>۱۰ صندوق BBB + جلسات کانال GCC + ایمیل Odin</td><td>دموی FundOps برای آقای مهیت‌مافی</td></tr>
+  <tr><td><b>۳</b></td><td>ایمیل‌های upsell روز ۷؛ هدف: ۱ نصب <span class="ltr">$950</span></td><td>معیار سیگنال روز ۱۴ ← تمرکز روی CSVآپلودکرده‌ها؛ هدف ۲ پک</td><td>شروع رزرو جلسات سرمایهٔ Mirex</td></tr>
+  <tr><td><b>۴</b></td><td>جمع‌بندی ماه ۱: <span class="ltr">$1.6–3.2k</span>؟</td><td>نقد-جلو کردن هر بستن؛ گزارش ۵ خطی به VC</td><td>جلسات Mirex ادامه؛ بازبینی همین سند</td></tr>
+</table>
+
+<div class="callout green avoid"><b>قرار بازبینی:</b> این سند هر ۳۰ روز یک‌بار مرور و به‌روز می‌شود (وضعیت‌ها، تیک‌ها، و تصمیم‌های جدید). نسخهٔ بعدی باید بتواند حداقل یک «مشتری پولی: ۰» را به عدد واقعی تبدیل کرده باشد.</div>
+
+</body>
+</html>
