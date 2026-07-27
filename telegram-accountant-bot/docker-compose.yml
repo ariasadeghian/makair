@@ -5,5 +5,16 @@ services:
     container_name: hesabyar
     restart: unless-stopped
     env_file: .env
+    # هنگام توقف، بات با SIGTERM صف نوشتن را روی گوگل‌شیت flush می‌کند؛
+    # فرصت کافی بده تا داده‌ی در صف گم نشود (پیش‌فرض docker فقط ۱۰ ثانیه است).
+    stop_grace_period: 30s
+    # چرخش لاگ تا دیسکِ سرورِ چندمحصوله پر نشود.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # سقف حافظه تا این محصول، بقیه‌ی محصولاتِ روی سرور مشترک را خفه نکند.
+    mem_limit: 512m
     # داده روی Google Sheets است؛ نیازی به حجم/دیتابیس محلی نیست.
     # فقط یک نمونه اجرا شود (polling با یک توکن نباید هم‌زمان دو نمونه داشته باشد).
