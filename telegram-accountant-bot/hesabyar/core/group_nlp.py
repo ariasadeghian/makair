@@ -12,9 +12,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import datetime as dt
+
 from ..db.models import GroupEventKind
-from . import money
+from . import money, nlp
 from .nlp import _clean_description, _keyword_max_pos
+
+#: کفِ مبلغ برای ثبتِ تراکنش در گروه (تومان).
+#: در گروه پیامِ غیرمالی زیاد است؛ عددهای کوچک معمولاً ساعت/تعداد/شماره‌اند
+#: («جلسه ساعت ۳») نه مبلغ.
+MIN_GROUP_AMOUNT = 1_000
 
 #: نشانه‌های «پرداخت انجام شد» (گذشته/انجام‌شده).
 PAYMENT_CUES: tuple[str, ...] = (
@@ -122,3 +129,31 @@ def detect_group_event(text: str) -> Optional[ParsedGroupEvent]:
         reason=_extract_reason(text),
         raw=text,
     )
+
+
+def detect_group_transaction(text: str, base: dt.datetime | None = None):
+    """فروش/هزینه‌ی خودِ کسب‌وکار در پیامِ گروه؛ ``None`` اگر مطمئن نباشیم.
+
+    در گفت‌وگوی خصوصی هر جمله‌ی دارای مبلغ را ثبت می‌کنیم، ولی در گروه پیامِ
+    غیرمالی فراوان است؛ پس **سخت‌گیرانه** عمل می‌کنیم و دو شرط را با هم می‌خواهیم:
+
+    1. یک فعلِ صریحِ مالی در متن باشد (فروختم/خریدم/دادم/پرداختم/گرفتم…)؛
+       صرفِ وجودِ عدد کافی نیست.
+    2. مبلغ از :data:`MIN_GROUP_AMOUNT` بیشتر باشد تا «جلسه ساعت ۳» یا
+       «۲ تا کارتن» به‌عنوان مبلغ خوانده نشود.
+    """
+    if not text or not text.strip():
+        return None
+
+    haystack = text.replace("‌", " ")
+    has_verb = (
+        _keyword_max_pos(haystack, nlp.INCOME_KEYWORDS) >= 0
+        or _keyword_max_pos(haystack, nlp.EXPENSE_KEYWORDS) >= 0
+    )
+    if not has_verb:
+        return None
+
+    parsed = nlp.parse_transaction(text, base=base)
+    if parsed is None or parsed.amount < MIN_GROUP_AMOUNT:
+        return None
+    return parsed

@@ -1,5 +1,5 @@
 """تست‌های تشخیص رویداد مالی در پیام گروه (خالص، بدون I/O)."""
-from hesabyar.core.group_nlp import detect_group_event
+from hesabyar.core.group_nlp import detect_group_event, detect_group_transaction
 from hesabyar.db.models import GroupEventKind
 
 
@@ -41,6 +41,35 @@ class TestDetectPayment:
         # «کردم» گذشته است؛ نباید با «کن» اشتباه شود
         ev = detect_group_event("پرداخت کردم")
         assert ev is not None and ev.kind == GroupEventKind.PAYMENT
+
+
+class TestDetectGroupTransaction:
+    def test_sale_detected(self):
+        from hesabyar.db.models import Kind
+        p = detect_group_transaction("۵ میلیون فروختم")
+        assert p is not None and p.kind == Kind.INCOME and p.amount == 5_000_000
+
+    def test_expense_detected(self):
+        from hesabyar.db.models import Kind
+        p = detect_group_transaction("قبض برق ۳۲۰ هزار دادم")
+        assert p is not None and p.kind == Kind.EXPENSE and p.amount == 320_000
+
+    def test_number_without_verb_rejected(self):
+        # عدد دارد ولی فعلِ مالی ندارد ⇒ نویزِ گروه
+        assert detect_group_transaction("جلسه ساعت ۳ باشه") is None
+        assert detect_group_transaction("فردا ۲ تا مشتری میان") is None
+
+    def test_tiny_amount_rejected(self):
+        # «ساعت ۳ … دادم» عدد کوچک دارد ⇒ زیرِ کفِ مبلغ
+        assert detect_group_transaction("ساعت ۳ خبر دادم") is None
+
+    def test_at_floor_boundary(self):
+        assert detect_group_transaction("۹۹۹ تومان دادم") is None
+        p = detect_group_transaction("۵ هزار تومان دادم")
+        assert p is not None and p.amount == 5_000
+
+    def test_empty_is_none(self):
+        assert detect_group_transaction("") is None
 
 
 class TestNoDetection:

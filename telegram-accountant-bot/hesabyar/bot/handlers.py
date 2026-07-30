@@ -23,7 +23,7 @@ from telegram.ext import (
 )
 
 from .. import plans
-from ..core import categories, group_nlp, industries, jalali, money
+from ..core import categories, group_nlp, industries, jalali, money, nlp
 from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
 from ..pdf.invoice_pdf import (
     render_invoice_image,
@@ -1522,9 +1522,13 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if chat is None or chat.type not in ("group", "supergroup"):
         return await update.message.reply_text(texts.GROUP_PRIVATE_ONLY)
     store = _store(context)
-    await update.message.reply_text(
-        group_service.build_group_report(store, chat.id), parse_mode="HTML"
-    )
+    parts = []
+    # دفترِ خودِ گروه (فروش/هزینه‌ها) اگر چیزی ثبت شده باشد
+    start, end = jalali.month_bounds(jalali.now())
+    if tx_service.summary(store, chat.id, start, end)["count"]:
+        parts.append(report_service.build_report(store, chat.id, jalali.now(), "month"))
+    parts.append(group_service.build_group_report(store, chat.id))
+    await update.message.reply_text("\n\n".join(parts), parse_mode="HTML")
 
 
 async def pilot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1540,6 +1544,52 @@ async def pilot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+#: نشانه‌ی رکوردِ در انتظارِ «تراکنشِ گروه» (فروش/خرجِ خودِ کسب‌وکار).
+_PENDING_TX = "tx"
+
+
+def _group_pending(context: ContextTypes.DEFAULT_TYPE, token: int, pending: dict):
+    """رکوردِ در انتظار را ذخیره و کیبوردِ تأیید را می‌سازد."""
+    context.chat_data.setdefault("grp_pending", {})[token] = pending
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_GROUP_CONFIRM, callback_data=f"grp:ok:{token}"),
+        InlineKeyboardButton(texts.BTN_GROUP_REJECT, callback_data=f"grp:no:{token}"),
+    ]])
+
+
+async def _offer_group_transaction(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
+) -> None:
+    """فروش/خرجِ گفته‌شده در گروه را (با تأیید) به دفترِ همان گروه پیشنهاد می‌دهد."""
+    msg = update.message
+    # در گروه سخت‌گیرانه تشخیص می‌دهیم تا پیامِ غیرمالی پیشنهادِ الکی نسازد.
+    parsed = group_nlp.detect_group_transaction(text, base=jalali.now())
+    if parsed is None:
+        return  # گپِ معمولیِ گروه؛ سکوت کن
+
+    store = _store(context)
+    group = store.get("users", msg.chat_id)
+    category = industries.refine_category(
+        text, parsed.kind, getattr(group, "business_type", "") if group else "",
+        parsed.category,
+    )
+    pending = {
+        "kind": _PENDING_TX,
+        "chat_id": msg.chat_id,
+        "chat_title": (msg.chat.title or "")[:200],
+        "actor_name": _display_name(update.effective_user),
+        "tx_kind": parsed.kind,
+        "amount": parsed.amount,
+        "category": category,
+        "description": parsed.description,
+        "occurred_at": parsed.occurred_at,
+    }
+    keyboard = _group_pending(context, msg.message_id, pending)
+    await msg.reply_text(
+        _group_confirm_body(pending), reply_markup=keyboard, parse_mode="HTML"
+    )
+
+
 def _group_confirm_body(pending: dict) -> str:
     """متن «ثبتش کنم؟» را از روی دادهٔ در انتظار می‌سازد."""
     amount = pending.get("amount")
@@ -1548,6 +1598,14 @@ def _group_confirm_body(pending: dict) -> str:
     reason_line = f"\nبابت: {reason}" if reason else ""
     actor = pending.get("actor_name") or "—"
     cp = pending.get("counterparty_name") or "—"
+    if pending["kind"] == _PENDING_TX:
+        head = (
+            texts.GROUP_CONFIRM_INCOME
+            if pending["tx_kind"] == Kind.INCOME
+            else texts.GROUP_CONFIRM_EXPENSE
+        )
+        who = f"{amount_str} — دسته: {pending['category']}"
+        return f"{head}\n{who}\n({actor})\n\n{texts.GROUP_CONFIRM_ASK}"
     if pending["kind"] == GroupEventKind.REQUEST:
         head = texts.GROUP_CONFIRM_REQUEST
         who = f"{actor} از {cp}: {amount_str}"
@@ -1566,12 +1624,15 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     msg = update.message
     if msg is None or not msg.text:
         return
-    parsed = group_nlp.detect_group_event(msg.text)
-    if parsed is None:
-        return
     sender = update.effective_user
     if sender is None:
         return
+    parsed = group_nlp.detect_group_event(msg.text)
+    if parsed is None:
+        # درخواست/پرداختِ بین اعضا نبود؛ شاید فروش/خرجِ خودِ کسب‌وکار باشد
+        # («۵ میلیون فروختم»). برای گروه از تشخیصِ قاعده‌محور استفاده می‌کنیم تا
+        # هر پیامِ گروه یک فراخوانیِ LLM نشود.
+        return await _offer_group_transaction(update, context, msg.text)
 
     chat_id = msg.chat_id
     store = _store(context)
@@ -1607,12 +1668,7 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not parsed.amount:
             return  # درخواستِ بدون مبلغ را نادیده بگیر (نویز)
 
-    token = msg.message_id
-    context.chat_data.setdefault("grp_pending", {})[token] = pending
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_GROUP_CONFIRM, callback_data=f"grp:ok:{token}"),
-        InlineKeyboardButton(texts.BTN_GROUP_REJECT, callback_data=f"grp:no:{token}"),
-    ]])
+    keyboard = _group_pending(context, msg.message_id, pending)
     await msg.reply_text(
         _group_confirm_body(pending), reply_markup=keyboard, parse_mode="HTML"
     )
@@ -1642,6 +1698,30 @@ async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     store = _store(context)
     chat_id = pending["chat_id"]
+    if pending["kind"] == _PENDING_TX:
+        # دفترِ گروه با شناسه‌ی خودِ گروه نگه داشته می‌شود (chat_id گروه‌ها منفی
+        # است و با شناسه‌ی کاربران تداخل نمی‌کند).
+        group = await tx_service.get_or_create_user(
+            store, chat_id, business_name=pending.get("chat_title") or None
+        )
+        if not group.business_name and pending.get("chat_title"):
+            group.business_name = pending["chat_title"]
+            await store.update("users", group)
+        await tx_service.add_transaction(
+            store, chat_id,
+            kind=pending["tx_kind"], amount=pending["amount"],
+            category=pending["category"], description=pending["description"],
+            occurred_at=pending["occurred_at"],
+        )
+        await store.flush()
+        report = report_service.build_report(store, chat_id, jalali.now(), "month")
+        head = (
+            texts.GROUP_SAVED_INCOME
+            if pending["tx_kind"] == Kind.INCOME
+            else texts.GROUP_SAVED_EXPENSE
+        )
+        return await _grp_edit(query, f"{head}\n\n{report}")
+
     if pending["kind"] == GroupEventKind.REQUEST:
         await group_service.add_request(
             store, chat_id,
