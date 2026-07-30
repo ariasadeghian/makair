@@ -100,7 +100,10 @@ def _pdate(value) -> Optional[dt.date]:
 @dataclass
 class User:
     TABLE = "users"
-    COLUMNS = ("id", "business_name", "phone", "address", "currency", "created_at")
+    COLUMNS = (
+        "id", "business_name", "phone", "address", "currency", "created_at",
+        "business_type",
+    )
 
     id: Optional[int] = None
     business_name: Optional[str] = None
@@ -108,11 +111,14 @@ class User:
     address: Optional[str] = None
     currency: str = "تومان"
     created_at: Optional[dt.datetime] = None
+    #: کلیدِ صنفِ کسب‌وکار (hesabyar.core.industries)؛ خالی = نامشخص.
+    business_type: str = ""
 
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.business_name), _s(self.phone),
             _s(self.address), _s(self.currency), _s(self.created_at),
+            _s(self.business_type),
         ]
 
     @classmethod
@@ -124,6 +130,7 @@ class User:
             address=(d.get("address") or None),
             currency=(d.get("currency") or "تومان"),
             created_at=_pdt(d.get("created_at")),
+            business_type=_pstr(d.get("business_type")),
         )
 
 

@@ -8,7 +8,7 @@ from telegram import (
     ReplyKeyboardMarkup,
 )
 
-from ..core import categories
+from ..core import categories, industries
 from ..core.money import format_amount
 from ..plans import PLAN_ORDER, PLANS
 from . import texts
@@ -121,6 +121,15 @@ def category_picker(transaction_id: int, kind: str) -> InlineKeyboardMarkup:
             row = []
     if row:
         rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
+def industry_picker() -> InlineKeyboardMarkup:
+    """انتخابگر صنفِ کسب‌وکار (یک دکمه در هر ردیف تا متن‌ها جا شوند)."""
+    rows = [
+        [InlineKeyboardButton(ind.label, callback_data=f"ind:{ind.key}")]
+        for ind in industries.all_industries()
+    ]
     return InlineKeyboardMarkup(rows)
 
 

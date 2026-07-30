@@ -23,7 +23,7 @@ from telegram.ext import (
 )
 
 from .. import plans
-from ..core import categories, group_nlp, jalali, money
+from ..core import categories, group_nlp, industries, jalali, money
 from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
 from ..pdf.invoice_pdf import (
     render_invoice_image,
@@ -447,10 +447,52 @@ async def _handle_onboarding(update, context, text: str) -> None:
     with _session(context) as session:
         user = await tx_service.get_or_create_user(session, uid)
         user.business_name = name[:200]
-        session.commit()
+        await session.update("users", user)
     _clear_flow(context)
+    # یک سؤالِ دکمه‌ای (قابل رد کردن) تا تجربه با صنفِ کاربر جور شود.
     await update.message.reply_text(
-        texts.ONBOARD_DONE.format(name=name), reply_markup=keyboards.main_menu()
+        texts.ONBOARD_ASK_INDUSTRY.format(name=name),
+        reply_markup=keyboards.industry_picker(),
+    )
+
+
+def _industry_welcome(key: str) -> str:
+    """پیامِ «حالا امتحان کن» + نکته‌های همان صنف."""
+    msg = texts.ONBOARD_DONE.format(example=industries.example_for(key))
+    tips = industries.tips_for(key)
+    if tips:
+        msg += texts.INDUSTRY_TIPS_HEADER
+        for tip in tips:
+            msg += f"\n• {tip}"
+    return msg
+
+
+async def on_industry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """انتخابِ صنفِ کسب‌وکار (دکمه‌های ``ind:<key>``)."""
+    query = update.callback_query
+    await query.answer()
+    key = query.data.split(":", 1)[1]
+    if industries.get(key) is None:
+        return
+    uid = update.effective_user.id
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        user.business_type = key
+        await session.update("users", user)
+    await _safe_edit(query, texts.INDUSTRY_CHANGED.format(
+        label=industries.label_for(key)
+    ))
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=_industry_welcome(key),
+        reply_markup=keyboards.main_menu(),
+    )
+
+
+async def industry_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """تغییرِ نوعِ کسب‌وکار (/industry)."""
+    await update.message.reply_text(
+        texts.INDUSTRY_ASK_AGAIN, reply_markup=keyboards.industry_picker()
     )
 
 
@@ -461,19 +503,23 @@ async def _log_transaction(update, context, text: str) -> None:
         return await update.message.reply_text(texts.UNKNOWN_INPUT)
     uid = update.effective_user.id
     with _session(context) as session:
-        await tx_service.get_or_create_user(session, uid)
+        user = await tx_service.get_or_create_user(session, uid)
         await sub_service.get_or_create_subscription(session, uid)
         if not sub_service.is_active(session, uid):
             session.commit()
             return await update.message.reply_text(
                 texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
             )
+        # دسته‌ی دقیق‌ترِ صنفی (اگر کاربر صنفش را انتخاب کرده باشد)
+        category = industries.refine_category(
+            text, parsed.kind, user.business_type, parsed.category
+        )
         tx = await tx_service.add_transaction(
             session,
             uid,
             kind=parsed.kind,
             amount=parsed.amount,
-            category=parsed.category,
+            category=category,
             description=parsed.description,
             occurred_at=parsed.occurred_at,
         )
@@ -484,7 +530,7 @@ async def _log_transaction(update, context, text: str) -> None:
     msg = (
         f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} ثبت شد\n"
         f"مبلغ: {money.format_amount(parsed.amount)}\n"
-        f"دسته: {parsed.category}\n"
+        f"دسته: {category}\n"
         f"تاریخ: {jalali.format_date(parsed.occurred_at)}"
     )
     if is_first:
@@ -1302,16 +1348,19 @@ async def _process_receipt_image(
 
     uid = update.effective_user.id
     with _session(context) as session:
-        await tx_service.get_or_create_user(session, uid)
+        user = await tx_service.get_or_create_user(session, uid)
         await sub_service.get_or_create_subscription(session, uid)
         if not sub_service.is_active(session, uid):
             session.commit()
             return await update.message.reply_text(
                 texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
             )
+        category = industries.refine_category(
+            extracted, parsed.kind, user.business_type, parsed.category
+        )
         tx = await tx_service.add_transaction(
             session, uid, kind=parsed.kind, amount=parsed.amount,
-            category=parsed.category, description=description,
+            category=category, description=description,
             occurred_at=parsed.occurred_at,
         )
         session.commit()
@@ -1321,7 +1370,7 @@ async def _process_receipt_image(
         f"{source_label} ثبت شد:",
         f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} — "
         f"{money.format_amount(parsed.amount)}",
-        f"دسته: {parsed.category}",
+        f"دسته: {category}",
     ]
     if vendor:
         lines.append(f"فروشنده: {vendor}")
@@ -1639,6 +1688,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("products", products_cmd))
     application.add_handler(CommandHandler("balance", balance_cmd))
     application.add_handler(CommandHandler("pilot", pilot_cmd))
+    application.add_handler(CommandHandler("industry", industry_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
@@ -1653,6 +1703,7 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
+    application.add_handler(CallbackQueryHandler(on_industry, pattern=r"^ind:"))
     # پیام‌های خصوصی (۱:۱) — جریان‌های شخصیِ کاربر
     private = filters.ChatType.PRIVATE
     application.add_handler(MessageHandler(filters.PHOTO & private, on_photo))

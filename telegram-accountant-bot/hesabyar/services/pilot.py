@@ -12,7 +12,7 @@ from collections import defaultdict
 from statistics import median
 from typing import Optional
 
-from ..core import jalali, money
+from ..core import industries, jalali, money
 from ..db.store import Store
 
 _EPOCH = dt.datetime(1970, 1, 1, tzinfo=jalali.TEHRAN)
@@ -72,9 +72,15 @@ def compute_pilot_metrics(store: Store, now: dt.datetime) -> dict:
             if count >= WEEK2_ACTIVE_MIN:
                 w2_active += 1
 
+    # توزیعِ صنف: کدام نیچ جذب می‌شود و کدام نه.
+    by_industry: dict[str, int] = defaultdict(int)
+    for u in users:
+        by_industry[getattr(u, "business_type", "") or ""] += 1
+
     return {
         "total_users": len(users),
         "activated": activated,
+        "by_industry": dict(by_industry),
         "fast_activation": fast_activation,
         "median_activation_secs": median(activation_secs) if activation_secs else None,
         "active_last_7": active_last_7,
@@ -146,7 +152,17 @@ def build_pilot_report(metrics: dict) -> str:
         f"• طلب/بدهی: {_fa(u['ledger'])} (از این تعداد چک: {_fa(u['cheques'])})",
         f"• کالای ذخیره‌شده: {_fa(u['products'])}",
         f"• رویداد گروهی: {_fa(u['group_events'])}",
-        "",
-        "<i>قانون: قابلیتی که هیچ‌کس استفاده نکرد، از منوی اصلی پنهان می‌شود.</i>",
     ]
+
+    by_ind = m.get("by_industry") or {}
+    if by_ind:
+        lines.append("")
+        lines.append("🏷 <b>صنفِ کاربران</b> (کدام نیچ جذب می‌شود)")
+        for key, count in sorted(by_ind.items(), key=lambda kv: -kv[1]):
+            lines.append(f"• {industries.label_for(key)}: {_fa(count)}")
+
+    lines.append("")
+    lines.append(
+        "<i>قانون: قابلیتی که هیچ‌کس استفاده نکرد، از منوی اصلی پنهان می‌شود.</i>"
+    )
     return "\n".join(lines)

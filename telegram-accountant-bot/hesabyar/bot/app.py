@@ -74,6 +74,7 @@ async def _on_startup(application: Application) -> None:
             BotCommand("backup", "پشتیبان کامل"),
             BotCommand("search", "جست‌وجو در تراکنش‌ها"),
             BotCommand("products", "کالاهای من"),
+            BotCommand("industry", "نوع کسب‌وکار من"),
             BotCommand("balance", "وضعیت مالی گروه"),
             BotCommand("undo", "لغو آخرین ثبت"),
             BotCommand("cancel", "لغو"),
