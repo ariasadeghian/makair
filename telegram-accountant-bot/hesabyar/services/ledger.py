@@ -152,6 +152,57 @@ def entries_for_party(store: Store, user_id: int, party_name: str) -> list[Ledge
     return sorted(store.list("ledger_entries", _match), key=_due_key)
 
 
+def find_party_tg_id(store: Store, user_id: int, party_name: str) -> Optional[int]:
+    """آیدی تلگرامِ یک طرف‌حساب را از فاکتورهای قبلیِ همان نام پیدا می‌کند.
+
+    وقتی مشتری لینکِ فاکتورش را باز می‌کند آیدی‌اش روی آن فاکتور ثبت می‌شود؛
+    این تابع همان را برای «یادآوری بدهی به خودِ مشتری» بازیابی می‌کند.
+    """
+    target = _norm_party(party_name)
+    if not target:
+        return None
+    for inv in store.list(
+        "invoices", lambda i: i.user_id == user_id and i.customer_tg_id
+    ):
+        name = _norm_party(inv.customer_name)
+        if target in name or name in target:
+            return int(inv.customer_tg_id)
+    return None
+
+
+def overdue_entries(
+    store: Store, user_id: int, base: dt.datetime, min_days: int = 1
+) -> list[LedgerEntry]:
+    """طلب‌هایی که دست‌کم ``min_days`` روز از سررسیدشان گذشته و تسویه نشده‌اند."""
+    cutoff = base.date() - dt.timedelta(days=max(0, min_days))
+    rows = store.list(
+        "ledger_entries",
+        lambda e: e.user_id == user_id
+        and not e.is_settled
+        and e.direction == Direction.RECEIVABLE
+        and e.due_date is not None
+        and e.due_date <= cutoff,
+    )
+    return sorted(rows, key=_due_key)
+
+
+def build_debtor_notice(entry: LedgerEntry, business=None) -> str:
+    """متنِ مؤدبانه‌ی یادآوری بدهی که برای خودِ بدهکار فرستاده می‌شود."""
+    who = ""
+    if business is not None and getattr(business, "business_name", None):
+        who = f" از طرف <b>{business.business_name}</b>"
+    due = (
+        f"\nسررسید: {jalali.format_date(entry.due_date)}"
+        if entry.due_date else ""
+    )
+    return (
+        f"🔔 یادآوری دوستانه{who}\n\n"
+        f"مبلغ <b>{money.format_amount(entry.amount)}</b> از حساب شما "
+        f"تسویه نشده است.{due}\n\n"
+        "اگر پرداخت کرده‌اید این پیام را نادیده بگیرید. 🙏"
+    )
+
+
 def party_statement_data(
     store: Store, user_id: int, party_name: str, business=None
 ) -> Optional[dict]:

@@ -43,6 +43,7 @@ from ..services import ledger as ledger_service
 from ..services import moadian as moadian_service
 from ..services import ocr as ocr_service
 from ..services import pilot as pilot_service
+from ..services import branches as branch_service
 from ..services import products as products_service
 from ..services import rates as rates_service
 from ..services import stt as stt_service
@@ -131,6 +132,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await update.message.reply_text(
             texts.GROUP_INTRO, parse_mode="HTML"
         )
+    # لینک فاکتور: /start fac_<token> ⇒ نمایش فاکتور به مشتری
+    args = context.args or []
+    if args and args[0].startswith("fac_"):
+        return await _show_shared_invoice(update, context, args[0][4:])
     _clear_flow(context)
     uid = update.effective_user.id
     with _session(context) as session:
@@ -438,6 +443,8 @@ async def _route_text(
         return await _handle_ledger_flow(update, context, text, flow)
     if flow == "statement_party":
         return await _handle_statement(update, context, text)
+    if flow == "branch_name":
+        return await _handle_branch_flow(update, context, text)
     if flow in ("invoice_customer", "invoice_items", "inv_discount", "inv_shipping"):
         return await _handle_invoice_flow(update, context, text, flow)
     if flow in ("prod_name", "prod_price"):
@@ -538,8 +545,10 @@ async def _log_transaction(update, context, text: str) -> None:
     parsed = await extract_service.extract_transaction(settings, text, base=jalali.now())
     if parsed is None:
         return await update.message.reply_text(texts.UNKNOWN_INPUT)
-    uid = update.effective_user.id
+    actor = update.effective_user.id
     with _session(context) as session:
+        # اگر کارمندِ شعبه است، ثبت در دفترِ صاحب کسب‌وکار با برچسبِ شعبه
+        uid, branch_id = branch_service.routing_for(session, actor)
         user = await tx_service.get_or_create_user(session, uid)
         await sub_service.get_or_create_subscription(session, uid)
         if not sub_service.is_active(session, uid):
@@ -560,6 +569,8 @@ async def _log_transaction(update, context, text: str) -> None:
             category=category,
             description=parsed.description,
             occurred_at=parsed.occurred_at,
+            branch_id=branch_id,
+            logged_by=actor if branch_id else None,
         )
         session.commit()
         tx_id = tx.id
@@ -987,10 +998,13 @@ async def _finalize_invoice(update, context) -> None:
                 shipping=int(inv.get("shipping", 0)),
             )
             await session.flush()  # فاکتور را فوری روی شیت بنویس
-        await _send_invoice_files(
-            context, chat_id, invoice, user,
-            caption=texts.INVOICE_DONE.format(number=invoice.number),
+        caption = texts.INVOICE_DONE.format(number=invoice.number)
+        link = invoice_service.share_link(
+            context.application.bot_data.get("bot_username", ""), invoice
         )
+        if link:
+            caption += texts.INVOICE_SHARE_HINT.format(link=link)
+        await _send_invoice_files(context, chat_id, invoice, user, caption=caption)
     finally:
         _clear_flow(context)
 
@@ -1026,6 +1040,66 @@ async def _send_invoice_files(context, chat_id, invoice, user, caption: str) -> 
                     os.remove(p)
                 except OSError:
                     pass
+
+
+async def _show_shared_invoice(update: Update, context, token: str) -> None:
+    """نمایش فاکتور به مشتری‌ای که لینکش را باز کرده (بدون نیاز به مالکیت).
+
+    آیدی تلگرامِ بازکننده روی فاکتور ثبت می‌شود تا بعداً بشود یادآوری بدهی را
+    مستقیم برایش فرستاد.
+    """
+    store = _store(context)
+    invoice = invoice_service.get_by_token(store, token)
+    if invoice is None:
+        return await update.message.reply_text(texts.INVOICE_LINK_BAD)
+
+    viewer = update.effective_user
+    owner = store.get("users", invoice.user_id)
+    # اگر بازکننده خودِ صاحب فاکتور نیست، او را به‌عنوان مشتری ثبت کن
+    if viewer is not None and viewer.id != invoice.user_id:
+        await invoice_service.attach_customer(store, invoice, viewer.id)
+        await store.flush()
+
+    await _send_invoice_files(
+        context, update.effective_chat.id, invoice, owner,
+        caption=texts.INVOICE_FOR_CUSTOMER.format(number=invoice.number),
+    )
+    if not invoice.rating:
+        await update.message.reply_text(
+            texts.RATING_ASK, reply_markup=keyboards.rating_stars(invoice.id)
+        )
+
+
+async def on_rating(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """امتیاز مشتری زیر فاکتور (⭐)."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, invoice_id_s, stars_s = query.data.split(":")
+        invoice_id, stars = int(invoice_id_s), int(stars_s)
+    except (ValueError, AttributeError):
+        return
+    store = _store(context)
+    invoice = store.get("invoices", invoice_id)
+    if invoice is None:
+        return
+    await invoice_service.set_rating(store, invoice, stars)
+    await store.flush()
+    await _safe_edit(query, texts.RATING_THANKS.format(
+        stars="⭐" * invoice.rating
+    ))
+    # صاحب کسب‌وکار را هم باخبر کن
+    try:
+        await context.bot.send_message(
+            chat_id=invoice.user_id,
+            text=texts.RATING_RECEIVED.format(
+                number=invoice.number, stars="⭐" * invoice.rating,
+                customer=invoice.customer_name,
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:  # noqa: BLE001 - نرسیدنِ اطلاع، امتیاز را باطل نمی‌کند
+        pass
 
 
 async def invoices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1893,6 +1967,150 @@ async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _grp_edit(query, f"{head}\n\n{report}")
 
 
+# --- یادآوری بدهی به خودِ مشتری ------------------------------------------------
+
+
+async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /remind — طلب‌های معوق، با دکمه‌ی «یادآوری به مشتری»."""
+    uid = update.effective_user.id
+    store = _store(context)
+    await tx_service.get_or_create_user(store, uid)
+    entries = ledger_service.overdue_entries(store, uid, jalali.now())
+    if not entries:
+        return await update.message.reply_text(texts.REMIND_NONE)
+
+    reachable = [
+        (e, ledger_service.find_party_tg_id(store, uid, e.party_name))
+        for e in entries
+    ]
+    lines = [texts.REMIND_HEADER]
+    for e, tg in reachable:
+        mark = "" if tg else texts.REMIND_NO_CONTACT
+        lines.append(
+            f"• {e.party_name}: {money.format_amount(e.amount)}"
+            f" (سررسید {jalali.format_date(e.due_date)}){mark}"
+        )
+    await update.message.reply_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=keyboards.debtor_reminders(
+            [(e, tg) for e, tg in reachable if tg]
+        ),
+    )
+
+
+async def on_debtor_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """ارسال یادآوری بدهی به خودِ بدهکار (با تأیید صاحب‌کار، نه خودکار)."""
+    query = update.callback_query
+    try:
+        entry_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return await query.answer()
+    uid = update.effective_user.id
+    store = _store(context)
+    entry = store.get("ledger_entries", entry_id)
+    if entry is None or entry.user_id != uid or entry.is_settled:
+        return await query.answer(texts.LEDGER_SETTLE_GONE, show_alert=True)
+
+    target = entry.party_tg_id or ledger_service.find_party_tg_id(
+        store, uid, entry.party_name
+    )
+    if not target:
+        return await query.answer(texts.REMIND_UNREACHABLE, show_alert=True)
+
+    owner = store.get("users", uid)
+    try:
+        await context.bot.send_message(
+            chat_id=target,
+            text=ledger_service.build_debtor_notice(entry, owner),
+            parse_mode="HTML",
+        )
+    except Exception:  # noqa: BLE001 - مشتری بات را بلاک/حذف کرده باشد
+        return await query.answer(texts.REMIND_FAILED, show_alert=True)
+
+    if not entry.party_tg_id:  # برای دفعه‌ی بعد ذخیره کن
+        entry.party_tg_id = target
+        await store.update("ledger_entries", entry)
+    await query.answer(texts.REMIND_SENT.format(party=entry.party_name))
+
+
+# --- شعبه‌ها --------------------------------------------------------------------
+
+
+async def branches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /branches — مدیریت شعبه‌ها (ویژه‌ی سطح طلایی)."""
+    uid = update.effective_user.id
+    store = _store(context)
+    await tx_service.get_or_create_user(store, uid)
+    if not await _require_feature(update, context, store, uid, plans.Feature.GROUP):
+        return
+    await update.message.reply_text(
+        branch_service.build_branch_list(store, uid),
+        parse_mode="HTML", reply_markup=keyboards.branch_menu(),
+    )
+
+
+async def on_branch_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های شعبه: افزودن و گزارش امروز."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":")[1]
+    uid = update.effective_user.id
+    store = _store(context)
+
+    if action == "add":
+        context.user_data["flow"] = "branch_name"
+        return await query.message.reply_text(texts.BRANCH_ASK_NAME)
+
+    if action == "report":
+        start, end = jalali.day_bounds(jalali.now())
+        return await _safe_edit_html(
+            query,
+            branch_service.build_branch_report(store, uid, start, end, "امروز"),
+            reply_markup=keyboards.branch_menu(),
+        )
+
+
+async def _handle_branch_flow(update, context, text: str) -> None:
+    """ساخت شعبه‌ی جدید با نامی که کاربر داد."""
+    uid = update.effective_user.id
+    _clear_flow(context)
+    store = _store(context)
+    branch = await branch_service.create_branch(store, uid, text)
+    await store.flush()
+    await update.message.reply_text(
+        texts.BRANCH_CREATED.format(name=branch.name, code=branch.code),
+        parse_mode="HTML", reply_markup=keyboards.main_menu(),
+    )
+
+
+async def join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /join — پیوستن کارمند به شعبه با کد."""
+    uid = update.effective_user.id
+    code = (update.message.text or "").partition(" ")[2].strip()
+    if not code:
+        return await update.message.reply_text(texts.JOIN_ASK_CODE, parse_mode="HTML")
+    store = _store(context)
+    member = await branch_service.join_with_code(
+        store, uid, code, name=_display_name(update.effective_user)
+    )
+    if member is None:
+        return await update.message.reply_text(texts.JOIN_BAD_CODE)
+    await store.flush()
+    branch = branch_service.get_branch(store, member.branch_id)
+    await update.message.reply_text(
+        texts.JOIN_OK.format(branch=branch.name if branch else "شعبه"),
+        parse_mode="HTML", reply_markup=keyboards.main_menu(),
+    )
+
+
+async def leave_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /leave — خروج کارمند از شعبه."""
+    store = _store(context)
+    left = await branch_service.leave(store, update.effective_user.id)
+    await store.flush()
+    await update.message.reply_text(texts.LEFT_OK if left else texts.LEFT_NONE)
+
+
 # --- نرخ دلار و نمای دلاری ----------------------------------------------------
 
 
@@ -1997,6 +2215,10 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("invoices", invoices_cmd))
     application.add_handler(CommandHandler("dollar", dollar_cmd))
     application.add_handler(CommandHandler("rate", rate_cmd))
+    application.add_handler(CommandHandler("remind", remind_cmd))
+    application.add_handler(CommandHandler("branches", branches_cmd))
+    application.add_handler(CommandHandler("join", join_cmd))
+    application.add_handler(CommandHandler("leave", leave_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
@@ -2013,6 +2235,9 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
     application.add_handler(CallbackQueryHandler(on_industry, pattern=r"^ind:"))
     application.add_handler(CallbackQueryHandler(on_invoice_history, pattern=r"^invh:"))
+    application.add_handler(CallbackQueryHandler(on_rating, pattern=r"^rate:"))
+    application.add_handler(CallbackQueryHandler(on_debtor_remind, pattern=r"^dremind:"))
+    application.add_handler(CallbackQueryHandler(on_branch_action, pattern=r"^branch:"))
     application.add_error_handler(on_error)
     # پیام‌های خصوصی (۱:۱) — جریان‌های شخصیِ کاربر
     private = filters.ChatType.PRIVATE

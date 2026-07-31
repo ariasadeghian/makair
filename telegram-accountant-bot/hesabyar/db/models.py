@@ -139,7 +139,7 @@ class Transaction:
     TABLE = "transactions"
     COLUMNS = (
         "id", "user_id", "kind", "amount", "category",
-        "description", "occurred_at", "created_at",
+        "description", "occurred_at", "created_at", "branch_id", "logged_by",
     )
 
     id: Optional[int] = None
@@ -150,12 +150,16 @@ class Transaction:
     description: str = ""
     occurred_at: Optional[dt.datetime] = None
     created_at: Optional[dt.datetime] = None
+    #: شعبه‌ی ثبت‌کننده (۰ = خودِ صاحب کسب‌وکار، بدون شعبه)
+    branch_id: int = 0
+    #: آیدی تلگرامِ کسی که ثبت کرده (اگر کارمندِ شعبه باشد)
+    logged_by: Optional[int] = None
 
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.user_id), _s(self.kind), _s(self.amount),
             _s(self.category), _s(self.description), _s(self.occurred_at),
-            _s(self.created_at),
+            _s(self.created_at), _s(self.branch_id), _s(self.logged_by),
         ]
 
     @classmethod
@@ -169,6 +173,8 @@ class Transaction:
             description=_pstr(d.get("description")),
             occurred_at=_pdt(d.get("occurred_at")),
             created_at=_pdt(d.get("created_at")),
+            branch_id=_pint(d.get("branch_id")) or 0,
+            logged_by=_pint(d.get("logged_by")),
         )
 
 
@@ -178,7 +184,7 @@ class LedgerEntry:
     COLUMNS = (
         "id", "user_id", "direction", "party_name", "amount",
         "description", "due_date", "is_settled", "settled_at", "created_at",
-        "instrument", "cheque_no",
+        "instrument", "cheque_no", "party_tg_id",
     )
 
     id: Optional[int] = None
@@ -193,6 +199,9 @@ class LedgerEntry:
     created_at: Optional[dt.datetime] = None
     instrument: str = Instrument.CASH
     cheque_no: str = ""
+    #: آیدی تلگرامِ طرف‌حساب (اگر لینک فاکتوری را باز کرده باشد) — برای
+    #: فرستادنِ یادآوریِ بدهی مستقیم به خودش.
+    party_tg_id: Optional[int] = None
 
     @property
     def is_cheque(self) -> bool:
@@ -203,7 +212,7 @@ class LedgerEntry:
             _s(self.id), _s(self.user_id), _s(self.direction), _s(self.party_name),
             _s(self.amount), _s(self.description), _s(self.due_date),
             _s(self.is_settled), _s(self.settled_at), _s(self.created_at),
-            _s(self.instrument), _s(self.cheque_no),
+            _s(self.instrument), _s(self.cheque_no), _s(self.party_tg_id),
         ]
 
     @classmethod
@@ -221,6 +230,7 @@ class LedgerEntry:
             created_at=_pdt(d.get("created_at")),
             instrument=_pstr(d.get("instrument")) or Instrument.CASH,
             cheque_no=_pstr(d.get("cheque_no")),
+            party_tg_id=_pint(d.get("party_tg_id")),
         )
 
 
@@ -262,7 +272,7 @@ class Invoice:
     COLUMNS = (
         "id", "user_id", "number", "seq", "customer_name", "customer_phone",
         "customer_address", "issue_date", "note", "discount", "shipping",
-        "created_at",
+        "created_at", "share_token", "customer_tg_id", "rating",
     )
 
     id: Optional[int] = None
@@ -277,6 +287,12 @@ class Invoice:
     discount: int = 0
     shipping: int = 0
     created_at: Optional[dt.datetime] = None
+    #: شناسه‌ی تصادفیِ لینک اشتراک‌گذاری (تا شماره‌ها قابل حدس‌زدن نباشند)
+    share_token: str = ""
+    #: آیدی تلگرامِ مشتری، وقتی لینک فاکتور را باز کرد
+    customer_tg_id: Optional[int] = None
+    #: امتیاز مشتری به این خرید (۱ تا ۵؛ ۰ = بدون امتیاز)
+    rating: int = 0
     #: اقلام فاکتور — از جدول invoice_items پر می‌شود (در شیت ذخیره نمی‌شود).
     items: list = field(default_factory=list)
 
@@ -294,6 +310,7 @@ class Invoice:
             _s(self.customer_name), _s(self.customer_phone),
             _s(self.customer_address), _s(self.issue_date), _s(self.note),
             _s(self.discount), _s(self.shipping), _s(self.created_at),
+            _s(self.share_token), _s(self.customer_tg_id), _s(self.rating),
         ]
 
     @classmethod
@@ -311,6 +328,9 @@ class Invoice:
             discount=_pint(d.get("discount")) or 0,
             shipping=_pint(d.get("shipping")) or 0,
             created_at=_pdt(d.get("created_at")),
+            share_token=_pstr(d.get("share_token")),
+            customer_tg_id=_pint(d.get("customer_tg_id")),
+            rating=_pint(d.get("rating")) or 0,
         )
 
 
@@ -512,9 +532,74 @@ class Rate:
         )
 
 
+@dataclass
+class Branch:
+    """یک شعبه از کسب‌وکار (برای صاحبانی که بیش از یک نقطه‌ی فروش دارند)."""
+
+    TABLE = "branches"
+    COLUMNS = ("id", "owner_id", "name", "code", "is_active", "created_at")
+
+    id: Optional[int] = None
+    owner_id: int = 0
+    name: str = ""
+    code: str = ""  # کد پیوستن که صاحب کسب‌وکار به کارمند می‌دهد
+    is_active: bool = True
+    created_at: Optional[dt.datetime] = None
+
+    def to_row(self) -> list:
+        return [
+            _s(self.id), _s(self.owner_id), _s(self.name), _s(self.code),
+            _s(self.is_active), _s(self.created_at),
+        ]
+
+    @classmethod
+    def from_row(cls, d: dict) -> "Branch":
+        return cls(
+            id=_pint(d.get("id")),
+            owner_id=_pint(d.get("owner_id")) or 0,
+            name=_pstr(d.get("name")),
+            code=_pstr(d.get("code")),
+            is_active=_pbool(d.get("is_active")),
+            created_at=_pdt(d.get("created_at")),
+        )
+
+
+@dataclass
+class BranchMember:
+    """کارمندی که با کدِ شعبه به آن پیوسته و از طرفِ همان شعبه ثبت می‌کند."""
+
+    TABLE = "branch_members"
+    COLUMNS = ("id", "branch_id", "owner_id", "user_id", "name", "created_at")
+
+    id: Optional[int] = None
+    branch_id: int = 0
+    owner_id: int = 0
+    user_id: int = 0
+    name: str = ""
+    created_at: Optional[dt.datetime] = None
+
+    def to_row(self) -> list:
+        return [
+            _s(self.id), _s(self.branch_id), _s(self.owner_id),
+            _s(self.user_id), _s(self.name), _s(self.created_at),
+        ]
+
+    @classmethod
+    def from_row(cls, d: dict) -> "BranchMember":
+        return cls(
+            id=_pint(d.get("id")),
+            branch_id=_pint(d.get("branch_id")) or 0,
+            owner_id=_pint(d.get("owner_id")) or 0,
+            user_id=_pint(d.get("user_id")) or 0,
+            name=_pstr(d.get("name")),
+            created_at=_pdt(d.get("created_at")),
+        )
+
+
 #: همه‌ی مدل‌ها به ترتیب تب‌ها (برای ساخت تب‌ها و بارگذاری).
 ALL_MODELS = (
     User, Transaction, LedgerEntry, Invoice, InvoiceItem,
     Subscription, Payment, Product, GroupEvent, Rate,
+    Branch, BranchMember,
 )
 TABLE_MODELS = {m.TABLE: m for m in ALL_MODELS}

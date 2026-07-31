@@ -157,6 +157,33 @@ def invoice_history(invoices) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(rows) if rows else None
 
 
+def rating_stars(invoice_id: int) -> InlineKeyboardMarkup:
+    """ستاره‌های امتیازدهی زیر فاکتورِ مشتری."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⭐" * n, callback_data=f"rate:{invoice_id}:{n}")
+        for n in (1, 2, 3, 4, 5)
+    ]])
+
+
+def debtor_reminders(pairs) -> InlineKeyboardMarkup | None:
+    """دکمه‌ی «یادآوری به مشتری» برای هر بدهکارِ قابل‌دسترس."""
+    rows = [
+        [InlineKeyboardButton(
+            f"📩 یادآوری به {e.party_name}", callback_data=f"dremind:{e.id}"
+        )]
+        for e, _tg in list(pairs)[:10]
+    ]
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def branch_menu() -> InlineKeyboardMarkup:
+    """منوی مدیریت شعبه‌ها."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ شعبه‌ی جدید", callback_data="branch:add")],
+        [InlineKeyboardButton("📊 گزارش امروزِ شعبه‌ها", callback_data="branch:report")],
+    ])
+
+
 def industry_picker() -> InlineKeyboardMarkup:
     """انتخابگر صنفِ کسب‌وکار (یک دکمه در هر ردیف تا متن‌ها جا شوند)."""
     rows = [

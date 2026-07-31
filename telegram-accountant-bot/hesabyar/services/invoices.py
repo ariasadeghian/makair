@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import secrets
 from typing import Optional, Sequence, TypedDict
 
 from ..core import jalali, money
@@ -59,6 +60,7 @@ async def create_invoice(
         customer_phone=customer_phone, customer_address=customer_address,
         issue_date=issue_date, note=note,
         discount=int(discount or 0), shipping=int(shipping or 0),
+        share_token=new_share_token(),
     )
     await store.add("invoices", invoice)
     for item in items:
@@ -87,3 +89,60 @@ def list_invoices(store: Store, user_id: int, limit: int = 10) -> list[Invoice]:
     for invoice in rows:
         invoice.items = _items_for(store, invoice.id)
     return rows
+
+
+# --- اشتراک‌گذاری با مشتری ------------------------------------------------------
+
+
+def new_share_token() -> str:
+    """توکن تصادفیِ لینک فاکتور.
+
+    تصادفی است تا کسی نتواند با شماره‌گذاریِ پشت‌سرهم فاکتورهای بقیه را ببیند.
+    فقط حروف/رقم است تا در deep-link تلگرام معتبر بماند.
+    """
+    return secrets.token_hex(8)
+
+
+def get_by_token(store: Store, token: str) -> Optional[Invoice]:
+    """فاکتور را با توکنِ لینک پیدا می‌کند (بدون نیاز به مالکیت)."""
+    if not token:
+        return None
+    rows = store.list("invoices", lambda i: i.share_token == token)
+    if not rows:
+        return None
+    invoice = rows[0]
+    invoice.items = _items_for(store, invoice.id)
+    return invoice
+
+
+def share_link(bot_username: str, invoice: Invoice) -> str:
+    """لینکِ باز کردن فاکتور در تلگرام برای مشتری."""
+    if not bot_username or not invoice.share_token:
+        return ""
+    return f"https://t.me/{bot_username}?start=fac_{invoice.share_token}"
+
+
+async def attach_customer(store: Store, invoice: Invoice, tg_id: int) -> None:
+    """آیدی تلگرامِ مشتری را روی فاکتور ثبت می‌کند (اولین بازکننده‌ی لینک)."""
+    if invoice.customer_tg_id == tg_id:
+        return
+    invoice.customer_tg_id = tg_id
+    await store.update("invoices", invoice)
+
+
+async def set_rating(store: Store, invoice: Invoice, stars: int) -> Invoice:
+    """امتیاز مشتری به این خرید (۱ تا ۵)."""
+    invoice.rating = max(1, min(5, int(stars)))
+    await store.update("invoices", invoice)
+    return invoice
+
+
+def rating_summary(store: Store, user_id: int) -> Optional[dict]:
+    """میانگین و تعداد امتیازهای یک کسب‌وکار؛ ``None`` اگر امتیازی نباشد."""
+    rated = store.list(
+        "invoices", lambda i: i.user_id == user_id and int(i.rating or 0) > 0
+    )
+    if not rated:
+        return None
+    total = sum(int(i.rating) for i in rated)
+    return {"count": len(rated), "average": total / len(rated)}

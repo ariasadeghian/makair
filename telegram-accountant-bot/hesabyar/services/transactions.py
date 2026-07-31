@@ -36,12 +36,19 @@ async def add_transaction(
     category: str,
     description: str,
     occurred_at: dt.datetime,
+    branch_id: int = 0,
+    logged_by: int | None = None,
 ) -> Transaction:
-    """یک تراکنش تازه ثبت می‌کند و شیء ذخیره‌شده را برمی‌گرداند."""
+    """یک تراکنش تازه ثبت می‌کند و شیء ذخیره‌شده را برمی‌گرداند.
+
+    ``branch_id``/``logged_by`` وقتی پر می‌شوند که کارمندِ یک شعبه ثبت کرده
+    باشد؛ تراکنش در دفترِ ``user_id`` (صاحب کسب‌وکار) می‌نشیند.
+    """
     await get_or_create_user(store, user_id)
     tx = Transaction(
         user_id=user_id, kind=kind, amount=int(amount), category=category,
         description=description, occurred_at=occurred_at,
+        branch_id=int(branch_id or 0), logged_by=logged_by,
     )
     await store.add("transactions", tx)
     return tx

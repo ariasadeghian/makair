@@ -113,8 +113,8 @@ journalctl -u hesabyar -f
 - **آماده‌سازی (یک‌بار):** پروژه‌ی Google Cloud با Sheets API + Drive API فعال؛
   یک Service Account با کلید JSON؛ یک اسپردشیت خالی که با ایمیل سرویس‌اکانت
   به‌عنوان **Editor** شیر شده باشد. `GOOGLE_SHEET_ID` را از URL آن بردارید.
-- **بدون دیتابیس محلی:** ۱۰ تب (users, transactions, ledger_entries, invoices,
-  invoice_items, subscriptions, payments, products, group_events, rates) خودکار
+- **بدون دیتابیس محلی:** ۱۲ تب (users, transactions, ledger_entries, invoices,
+  invoice_items, subscriptions, payments, products, group_events, rates, branches, branch_members) خودکار
   در اولین اجرا ساخته می‌شوند.
 - **در حافظه + نوشتن دسته‌ای:** کل داده هنگام بالا آمدن خوانده می‌شود؛ خواندن‌ها
   از حافظه (سریع، بدون Rate Limit) و نوشتن‌ها هر ۵ ثانیه به‌صورت دسته‌ای روی
