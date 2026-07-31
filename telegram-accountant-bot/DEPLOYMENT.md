@@ -88,6 +88,7 @@ journalctl -u hesabyar -f
 | `REMINDER_LEAD_DAYS` | `2` | چند روز قبل از سررسید هم پیشاپیش یادآوری شود (۰ = فقط روزِ سررسید و معوق) |
 | `NIGHTLY_SUMMARY` / `NIGHTLY_SUMMARY_HOUR` | `true` / `21` | خلاصه‌ی خودکار شبانه فقط برای کاربرانِ فعالِ همان روز |
 | `ADMIN_IDS` | — | شناسه‌های عددی ادمین‌ها، با کاما. تأییدکننده‌ی پرداخت‌ها |
+| `RATE_CHANNEL_ID` | — | کانالِ نرخ روزانه‌ی دلار (بات باید ادمینِ آن باشد). خالی = ثبت دستی با `/rate` |
 | `PAYMENT_METHOD` | `card` | `card` (کارت‌به‌کارت) یا `zarinpal` (درگاه) |
 | `CARD_NUMBER` / `CARD_HOLDER` | — | برای روش کارت‌به‌کارت |
 | `ZARINPAL_MERCHANT_ID` | — | برای روش زرین‌پال |
@@ -112,9 +113,9 @@ journalctl -u hesabyar -f
 - **آماده‌سازی (یک‌بار):** پروژه‌ی Google Cloud با Sheets API + Drive API فعال؛
   یک Service Account با کلید JSON؛ یک اسپردشیت خالی که با ایمیل سرویس‌اکانت
   به‌عنوان **Editor** شیر شده باشد. `GOOGLE_SHEET_ID` را از URL آن بردارید.
-- **بدون دیتابیس محلی:** ۹ تب (users, transactions, ledger_entries, invoices,
-  invoice_items, subscriptions, payments, products, group_events) خودکار در
-  اولین اجرا ساخته می‌شوند.
+- **بدون دیتابیس محلی:** ۱۰ تب (users, transactions, ledger_entries, invoices,
+  invoice_items, subscriptions, payments, products, group_events, rates) خودکار
+  در اولین اجرا ساخته می‌شوند.
 - **در حافظه + نوشتن دسته‌ای:** کل داده هنگام بالا آمدن خوانده می‌شود؛ خواندن‌ها
   از حافظه (سریع، بدون Rate Limit) و نوشتن‌ها هر ۵ ثانیه به‌صورت دسته‌ای روی
   شیت می‌روند. عملیات پول‌محور (تأیید پرداخت/صدور فاکتور) بلافاصله flush می‌شوند.

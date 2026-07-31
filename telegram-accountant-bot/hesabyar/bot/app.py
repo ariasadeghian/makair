@@ -71,6 +71,7 @@ async def _on_startup(application: Application) -> None:
             BotCommand("list", "تراکنش‌های اخیر"),
             BotCommand("invoices", "فاکتورهای اخیر (ارسال دوباره)"),
             BotCommand("dashboard", "داشبورد تصویری"),
+            BotCommand("dollar", "نمای دلاری درآمد"),
             BotCommand("export", "خروجی اکسل"),
             BotCommand("backup", "پشتیبان کامل"),
             BotCommand("search", "جست‌وجو در تراکنش‌ها"),

@@ -478,9 +478,43 @@ class GroupEvent:
         )
 
 
+@dataclass
+class Rate:
+    """نرخ دلار در یک روز (تومان به ازای هر دلار).
+
+    برای هر تاریخ حداکثر یک ردیف نگه داشته می‌شود؛ ثبت دوباره‌ی همان روز
+    مقدار را به‌روز می‌کند.
+    """
+
+    TABLE = "rates"
+    COLUMNS = ("id", "date", "usd", "source", "created_at")
+
+    id: Optional[int] = None
+    date: Optional[dt.date] = None
+    usd: int = 0  # تومان به ازای هر دلار
+    source: str = "manual"  # manual | channel
+    created_at: Optional[dt.datetime] = None
+
+    def to_row(self) -> list:
+        return [
+            _s(self.id), _s(self.date), _s(self.usd),
+            _s(self.source), _s(self.created_at),
+        ]
+
+    @classmethod
+    def from_row(cls, d: dict) -> "Rate":
+        return cls(
+            id=_pint(d.get("id")),
+            date=_pdate(d.get("date")),
+            usd=_pint(d.get("usd")) or 0,
+            source=_pstr(d.get("source")) or "manual",
+            created_at=_pdt(d.get("created_at")),
+        )
+
+
 #: همه‌ی مدل‌ها به ترتیب تب‌ها (برای ساخت تب‌ها و بارگذاری).
 ALL_MODELS = (
     User, Transaction, LedgerEntry, Invoice, InvoiceItem,
-    Subscription, Payment, Product, GroupEvent,
+    Subscription, Payment, Product, GroupEvent, Rate,
 )
 TABLE_MODELS = {m.TABLE: m for m in ALL_MODELS}

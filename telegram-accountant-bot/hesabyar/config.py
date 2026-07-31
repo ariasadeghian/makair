@@ -85,6 +85,9 @@ class Settings:
     stt_model: str = "whisper-1"
     stt_language: str = "fa"
     admin_ids: tuple[int, ...] = field(default_factory=tuple)
+    # کانالی که نرخ روزانه‌ی دلار را می‌گذارد. بات باید ادمینِ آن باشد تا
+    # پست‌ها را ببیند. خالی = فقط ثبت دستی با /rate.
+    rate_channel_id: int | None = None
     # پرداخت کارت‌به‌کارت اشتراک
     card_number: str = ""
     card_holder: str = ""
@@ -184,6 +187,7 @@ def load_settings(require_token: bool = True) -> Settings:
         stt_model=_get("STT_MODEL", "whisper-1"),
         stt_language=_get("STT_LANGUAGE", "fa"),
         admin_ids=admin_ids,
+        rate_channel_id=_get_int("RATE_CHANNEL_ID", 0) or None,
         card_number=_get("CARD_NUMBER", ""),
         card_holder=_get("CARD_HOLDER", ""),
         trial_days=_get_int("TRIAL_DAYS", 14),

@@ -44,6 +44,7 @@ from ..services import moadian as moadian_service
 from ..services import ocr as ocr_service
 from ..services import pilot as pilot_service
 from ..services import products as products_service
+from ..services import rates as rates_service
 from ..services import stt as stt_service
 from ..services import reports as report_service
 from ..services import subscription as sub_service
@@ -1848,6 +1849,77 @@ async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _grp_edit(query, f"{head}\n\n{report}")
 
 
+# --- نرخ دلار و نمای دلاری ----------------------------------------------------
+
+
+async def dollar_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /dollar — درآمد و هزینه‌ی این ماه از نگاهِ دلار."""
+    uid = update.effective_user.id
+    with _session(context) as session:
+        await tx_service.get_or_create_user(session, uid)
+        report = rates_service.build_usd_report(session, uid, jalali.now())
+    await update.message.reply_text(report, parse_mode="HTML")
+
+
+async def rate_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /rate — نمایش نرخ امروز، یا ثبت آن توسط ادمین.
+
+    ``/rate`` نرخ فعلی را نشان می‌دهد؛ ``/rate ۸۹۰۰۰`` آن را ثبت می‌کند
+    (فقط ادمین).
+    """
+    settings = context.application.bot_data["settings"]
+    uid = update.effective_user.id
+    text = (update.message.text or "").partition(" ")[2].strip()
+    store = _store(context)
+
+    if not text:
+        latest = rates_service.latest_rate(store)
+        if latest is None:
+            return await update.message.reply_text(texts.RATE_NONE)
+        return await update.message.reply_text(
+            texts.RATE_CURRENT.format(
+                rate=money.format_amount(latest.usd),
+                date=jalali.format_date(latest.date),
+            ),
+            parse_mode="HTML",
+        )
+
+    if uid not in settings.admin_ids:
+        return await update.message.reply_text(texts.ADMIN_NOT_ALLOWED)
+    value = money.parse_amount(text)
+    if value is None or not (rates_service.MIN_RATE <= value <= rates_service.MAX_RATE):
+        return await update.message.reply_text(texts.RATE_BAD)
+    row = await rates_service.set_rate(store, value, source="manual")
+    await store.flush()  # نرخ مبنای محاسبات مالی است؛ فوری ثبت شود
+    await update.message.reply_text(
+        texts.RATE_SAVED.format(
+            rate=money.format_amount(row.usd), date=jalali.format_date(row.date)
+        ),
+        parse_mode="HTML",
+    )
+
+
+async def on_channel_rate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """پستِ کانالِ نرخ را می‌خواند و نرخ روز را خودکار ثبت می‌کند.
+
+    فقط از کانالِ تنظیم‌شده در ``RATE_CHANNEL_ID`` پذیرفته می‌شود و بات باید
+    ادمینِ آن کانال باشد تا پست‌ها به دستش برسد.
+    """
+    settings = context.application.bot_data["settings"]
+    post = update.channel_post
+    if post is None or not settings.rate_channel_id:
+        return
+    if post.chat_id != settings.rate_channel_id:
+        return
+    value = rates_service.parse_rate_message(post.text or post.caption or "")
+    if value is None:
+        return
+    store = _store(context)
+    await rates_service.set_rate(store, value, source="channel")
+    await store.flush()
+    logger.info("نرخ دلار از کانال ثبت شد: %s", value)
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """خطای گرفته‌نشده: لاگ کامل + پیام مؤدبانه به کاربر (به‌جای سکوت)."""
     logger.exception("خطای گرفته‌نشده در هندلر", exc_info=context.error)
@@ -1877,6 +1949,8 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("pilot", pilot_cmd))
     application.add_handler(CommandHandler("industry", industry_cmd))
     application.add_handler(CommandHandler("invoices", invoices_cmd))
+    application.add_handler(CommandHandler("dollar", dollar_cmd))
+    application.add_handler(CommandHandler("rate", rate_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
@@ -1903,6 +1977,10 @@ def register(application: Application) -> None:
     )
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND & private, on_text)
+    )
+    # پستِ کانالِ نرخ دلار (اگر RATE_CHANNEL_ID تنظیم شده باشد)
+    application.add_handler(
+        MessageHandler(filters.ChatType.CHANNEL, on_channel_rate)
     )
     # پیام‌های گروه — دفتر مالی گروهی (نیازمند خاموش‌بودن Privacy Mode)
     application.add_handler(
