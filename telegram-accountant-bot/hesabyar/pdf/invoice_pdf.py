@@ -37,10 +37,14 @@ from ..core import jalali, money
 #: نام فونتی که در reportlab ثبت می‌شود.
 _FONT_NAME = "Vazirmatn"
 
+#: نام فونت ضخیم (برای سربرگ، عنوان و جمع کل).
+_FONT_BOLD = "Vazirmatn-Bold"
+
+_FONTS_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+
 #: مسیر پیش‌فرض فونت (کنار همین ماژول: ``pdf/fonts/Vazirmatn-Regular.ttf``).
-_DEFAULT_FONT_PATH = os.path.join(
-    os.path.dirname(__file__), "fonts", "Vazirmatn-Regular.ttf"
-)
+_DEFAULT_FONT_PATH = os.path.join(_FONTS_DIR, "Vazirmatn-Regular.ttf")
+_DEFAULT_BOLD_PATH = os.path.join(_FONTS_DIR, "Vazirmatn-Bold.ttf")
 
 
 def _resolve_font_path() -> str:
@@ -71,6 +75,21 @@ def register_font() -> str:
     font_path = _resolve_font_path()
     pdfmetrics.registerFont(TTFont(_FONT_NAME, font_path))
     return _FONT_NAME
+
+
+def register_bold_font() -> str:
+    """فونت ضخیم را ثبت می‌کند؛ اگر نبود، به فونت معمولی برمی‌گردد.
+
+    نبودِ فایلِ ضخیم نباید صدور فاکتور را بشکند، پس در آن حالت نام فونت
+    معمولی برگردانده می‌شود.
+    """
+    if _FONT_BOLD in pdfmetrics.getRegisteredFontNames():
+        return _FONT_BOLD
+    bold_path = os.environ.get("HESABYAR_PDF_FONT_BOLD") or _DEFAULT_BOLD_PATH
+    if not os.path.isfile(bold_path):
+        return register_font()
+    pdfmetrics.registerFont(TTFont(_FONT_BOLD, bold_path))
+    return _FONT_BOLD
 
 
 #: نشانه‌ی چپ‌به‌راست (U+200E) برای نگه‌داشتن ترتیب توکن‌های عددی/لاتین
@@ -119,10 +138,11 @@ def render_invoice_pdf(
     :returns: همان ``out_path``.
     """
     font_name = register_font()
+    bold_name = register_bold_font()
 
     # --- سبک‌های متنی راست‌چین ------------------------------------------------
     header_style = ParagraphStyle(
-        "Header", fontName=font_name, fontSize=18, alignment=TA_CENTER,
+        "Header", fontName=bold_name, fontSize=18, alignment=TA_CENTER,
         leading=24,
     )
     subheader_style = ParagraphStyle(
@@ -130,7 +150,7 @@ def render_invoice_pdf(
         leading=16, textColor=colors.HexColor("#555555"),
     )
     title_style = ParagraphStyle(
-        "Title", fontName=font_name, fontSize=15, alignment=TA_CENTER,
+        "Title", fontName=bold_name, fontSize=15, alignment=TA_CENTER,
         leading=22,
     )
     normal_style = ParagraphStyle(
@@ -138,7 +158,7 @@ def render_invoice_pdf(
         leading=18,
     )
     total_style = ParagraphStyle(
-        "Total", fontName=font_name, fontSize=13, alignment=TA_RIGHT,
+        "Total", fontName=bold_name, fontSize=13, alignment=TA_RIGHT,
         leading=20,
     )
 
@@ -211,6 +231,7 @@ def render_invoice_pdf(
         TableStyle(
             [
                 ("FONTNAME", (0, 0), (-1, -1), font_name),
+                ("FONTNAME", (0, 0), (-1, 0), bold_name),  # سطر هدر
                 ("FONTSIZE", (0, 0), (-1, -1), 10),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#888888")),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EFEFEF")),
@@ -310,6 +331,7 @@ def render_statement_pdf(data: dict, out_path: str) -> str:
     اضافه و مناسبِ فوروارد باشد.
     """
     font_name = register_font()
+    bold_name = register_bold_font()
     entries = list(data.get("entries") or [])
     n = max(1, len(entries))
     page_w = 120 * mm
@@ -318,10 +340,10 @@ def render_statement_pdf(data: dict, out_path: str) -> str:
     page_h = (80 + n * 14) * mm
 
     title_style = ParagraphStyle(
-        "StTitle", fontName=font_name, fontSize=16, alignment=TA_CENTER, leading=24,
+        "StTitle", fontName=bold_name, fontSize=16, alignment=TA_CENTER, leading=24,
     )
     biz_style = ParagraphStyle(
-        "StBiz", fontName=font_name, fontSize=13, alignment=TA_CENTER, leading=20,
+        "StBiz", fontName=bold_name, fontSize=13, alignment=TA_CENTER, leading=20,
     )
     sub_style = ParagraphStyle(
         "StSub", fontName=font_name, fontSize=10, alignment=TA_CENTER, leading=16,
@@ -350,6 +372,7 @@ def render_statement_pdf(data: dict, out_path: str) -> str:
     table.setStyle(
         TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font_name),
+            ("FONTNAME", (0, 0), (-1, 0), bold_name),  # سطر هدر
             ("FONTSIZE", (0, 0), (-1, -1), 10),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#BBBBBB")),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EFEFEF")),
@@ -371,7 +394,7 @@ def render_statement_pdf(data: dict, out_path: str) -> str:
     else:
         balance_text = "مانده: تسویه"
     balance_style = ParagraphStyle(
-        "StBal", fontName=font_name, fontSize=15, alignment=TA_CENTER, leading=24,
+        "StBal", fontName=bold_name, fontSize=15, alignment=TA_CENTER, leading=24,
         textColor=colors.HexColor("#1f3a5f"),
     )
     story.append(_para(balance_text, balance_style))
