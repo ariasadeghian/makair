@@ -81,6 +81,29 @@ def _kind_icon(kind: str) -> str:
     return texts.TX_INCOME_ICON if kind == Kind.INCOME else texts.TX_EXPENSE_ICON
 
 
+def _watermark(context: ContextTypes.DEFAULT_TYPE, store, uid: int) -> str:
+    """امضای پای سند برای کاربرانِ سطح برنزی؛ برای بقیه رشته‌ی خالی."""
+    if sub_service.has_feature(store, uid, plans.Feature.NO_WATERMARK):
+        return ""
+    username = context.application.bot_data.get("bot_username") or ""
+    if not username:
+        username = getattr(
+            context.application.bot_data.get("settings"), "bot_username", ""
+        )
+    return f"ساخته‌شده با @{username}" if username else "ساخته‌شده با حسابیار"
+
+
+async def _require_feature(update, context, store, uid: int, feature: str) -> bool:
+    """اگر کاربر دسترسی ندارد، پیام ارتقا می‌دهد و ``False`` برمی‌گرداند."""
+    if sub_service.has_feature(store, uid, feature):
+        return True
+    await update.message.reply_text(
+        texts.FEATURE_LOCKED.format(feature=texts.FEATURE_NAMES.get(feature, feature)),
+        reply_markup=keyboards.subscription_plans(),
+    )
+    return False
+
+
 def _paywall_text(store, uid: int) -> str:
     """پیامِ نیاز به اشتراک: شخصی‌شده با خلاصه‌ی ارزشی که کاربر گرفته."""
     parts = [texts.SUB_REQUIRED]
@@ -708,6 +731,10 @@ async def _handle_statement(update, context, text: str) -> None:
         return await update.message.reply_text(texts.STATEMENT_ASK_NAME)
     uid = update.effective_user.id
     chat_id = update.effective_chat.id
+    if not await _require_feature(
+        update, context, _store(context), uid, plans.Feature.STATEMENT
+    ):
+        return
     with _session(context) as session:
         user = await tx_service.get_or_create_user(session, uid)
         data = ledger_service.party_statement_data(session, uid, name, business=user)
@@ -721,7 +748,9 @@ async def _handle_statement(update, context, text: str) -> None:
         )
     out_path = os.path.join(tempfile.gettempdir(), f"statement_{uid}.png")
     try:
-        render_statement_image(data, out_path)
+        render_statement_image(
+            data, out_path, watermark=_watermark(context, _store(context), uid)
+        )
         with open(out_path, "rb") as fh:
             await context.bot.send_photo(
                 chat_id, photo=fh,
@@ -974,11 +1003,12 @@ async def _send_invoice_files(context, chat_id, invoice, user, caption: str) -> 
         holder = f" به نام {settings.card_holder}" if settings.card_holder else ""
         payment_note = f"پرداخت: کارت‌به‌کارت به {settings.card_number}{holder}"
 
+    mark = _watermark(context, _store(context), getattr(user, "id", 0) or 0)
     img_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice.id}.png")
     pdf_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice.id}.pdf")
     try:
-        render_invoice_image(invoice, user, img_path, payment_note)
-        render_invoice_pdf(invoice, user, pdf_path, payment_note)
+        render_invoice_image(invoice, user, img_path, payment_note, watermark=mark)
+        render_invoice_pdf(invoice, user, pdf_path, payment_note, watermark=mark)
         with open(img_path, "rb") as fh:
             await context.bot.send_photo(
                 chat_id, photo=fh, caption=caption,
@@ -1419,6 +1449,14 @@ async def _process_receipt_image(
     source_label: str,
 ) -> None:
     """بایت‌های تصویر را OCR می‌کند و به‌عنوان تراکنش ثبت می‌کند."""
+    store = _store(context)
+    uid_gate = update.effective_user.id
+    await tx_service.get_or_create_user(store, uid_gate)
+    if not await _require_feature(
+        update, context, store, uid_gate, plans.Feature.OCR
+    ):
+        return
+
     provider = context.application.bot_data.get("ocr")
     if provider is None or isinstance(provider, ocr_service.NullOcrProvider):
         return await update.message.reply_text(texts.OCR_DISABLED)
@@ -1536,6 +1574,12 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     media = msg.voice or msg.audio
     if media is None:
+        return
+
+    store = _store(context)
+    uid = update.effective_user.id
+    await tx_service.get_or_create_user(store, uid)
+    if not await _require_feature(update, context, store, uid, plans.Feature.VOICE):
         return
 
     provider = context.application.bot_data.get("stt")
@@ -1855,9 +1899,11 @@ async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def dollar_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """دستور /dollar — درآمد و هزینه‌ی این ماه از نگاهِ دلار."""
     uid = update.effective_user.id
-    with _session(context) as session:
-        await tx_service.get_or_create_user(session, uid)
-        report = rates_service.build_usd_report(session, uid, jalali.now())
+    store = _store(context)
+    await tx_service.get_or_create_user(store, uid)
+    if not await _require_feature(update, context, store, uid, plans.Feature.DOLLAR):
+        return
+    report = rates_service.build_usd_report(store, uid, jalali.now())
     await update.message.reply_text(report, parse_mode="HTML")
 
 

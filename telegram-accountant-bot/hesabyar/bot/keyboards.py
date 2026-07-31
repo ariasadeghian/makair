@@ -10,7 +10,7 @@ from telegram import (
 
 from ..core import categories, industries
 from ..core.money import format_amount
-from ..plans import PLAN_ORDER, PLANS
+from ..plans import PLANS, TIER_ORDER, TIERS, plans_for_tier
 from . import texts
 
 
@@ -25,12 +25,17 @@ def main_menu() -> ReplyKeyboardMarkup:
 
 
 def subscription_plans() -> InlineKeyboardMarkup:
-    """دکمه‌های خرید پلن‌های اشتراک."""
-    rows = []
-    for key in PLAN_ORDER:
-        plan = PLANS[key]
-        label = f"{plan['label']} — {format_amount(plan['price'])}"
-        rows.append([InlineKeyboardButton(label, callback_data=f"sub:buy:{key}")])
+    """دکمه‌های خرید پلن‌ها — هر سطح در یک ردیف (ماهانه و یک‌ساله کنار هم)."""
+    rows: list = []
+    for tier in TIER_ORDER:
+        row = []
+        for key in plans_for_tier(tier):
+            plan = PLANS[key]
+            period = "ماهانه" if plan["days"] <= 31 else "سالانه"
+            label = f"{TIERS[tier]['label']} {period} — {format_amount(plan['price'], with_currency=False)}"
+            row.append(InlineKeyboardButton(label, callback_data=f"sub:buy:{key}"))
+        if row:
+            rows.append(row)
     return InlineKeyboardMarkup(rows)
 
 

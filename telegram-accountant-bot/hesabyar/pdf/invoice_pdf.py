@@ -122,8 +122,18 @@ def _para(text: str, style: ParagraphStyle) -> Paragraph:
     return Paragraph(shape_fa(text), style)
 
 
+def _watermark_para(watermark: str, font_name: str) -> Paragraph:
+    """امضای کوچکِ بات برای پای سند (سطح برنزی)."""
+    style = ParagraphStyle(
+        "Watermark", fontName=font_name, fontSize=8, alignment=TA_CENTER,
+        leading=12, textColor=colors.HexColor("#9A9A9A"),
+    )
+    return _para(watermark, style)
+
+
 def render_invoice_pdf(
-    invoice: Any, business: Any, out_path: str, payment_note: str = ""
+    invoice: Any, business: Any, out_path: str, payment_note: str = "",
+    watermark: str = "",
 ) -> str:
     """یک فاکتور فروش A4 راست‌چین در مسیر ``out_path`` می‌سازد.
 
@@ -275,6 +285,11 @@ def render_invoice_pdf(
         story.append(Spacer(1, 4 * mm))
         story.append(_para(f"توضیحات: {note}", normal_style))
 
+    # --- امضای بات (سطح برنزی) ------------------------------------------------
+    if watermark:
+        story.append(Spacer(1, 8 * mm))
+        story.append(_watermark_para(watermark, font_name))
+
     # --- ساخت سند ------------------------------------------------------------
     doc = SimpleDocTemplate(
         out_path,
@@ -295,6 +310,7 @@ def render_invoice_image(
     out_path: str,
     payment_note: str = "",
     dpi: int = 150,
+    watermark: str = "",
 ) -> str:
     """فاکتور را به‌صورت تصویر PNG می‌سازد (برای فوروارد آسان در پیام‌رسان‌ها).
 
@@ -308,7 +324,7 @@ def render_invoice_image(
     fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
     try:
-        render_invoice_pdf(invoice, business, tmp_pdf, payment_note)
+        render_invoice_pdf(invoice, business, tmp_pdf, payment_note, watermark)
         with fitz.open(tmp_pdf) as doc:
             doc[0].get_pixmap(dpi=dpi).save(out_path)
     finally:
@@ -320,7 +336,7 @@ def render_invoice_image(
     return out_path
 
 
-def render_statement_pdf(data: dict, out_path: str) -> str:
+def render_statement_pdf(data: dict, out_path: str, watermark: str = "") -> str:
     """کارتِ «صورتحساب طرف‌حساب» را به‌صورت یک PDF جمع‌وجور می‌سازد.
 
     ``data`` همان دیکشنریِ خروجی
@@ -402,6 +418,9 @@ def render_statement_pdf(data: dict, out_path: str) -> str:
     date_val = data.get("date")
     if date_val is not None:
         story.append(_para(f"تاریخ: {jalali.format_date(date_val)}", sub_style))
+    if watermark:
+        story.append(Spacer(1, 3 * mm))
+        story.append(_watermark_para(watermark, font_name))
 
     doc = SimpleDocTemplate(
         out_path, pagesize=(page_w, page_h),
@@ -436,7 +455,9 @@ def _autocrop_whitespace(path: str, pad: int = 26) -> None:
         return
 
 
-def render_statement_image(data: dict, out_path: str, dpi: int = 150) -> str:
+def render_statement_image(
+    data: dict, out_path: str, dpi: int = 150, watermark: str = ""
+) -> str:
     """صورتحساب طرف‌حساب را به‌صورت تصویر PNG می‌سازد (برای فوروارد آسان)."""
     import os
     import tempfile
@@ -446,7 +467,7 @@ def render_statement_image(data: dict, out_path: str, dpi: int = 150) -> str:
     fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
     try:
-        render_statement_pdf(data, tmp_pdf)
+        render_statement_pdf(data, tmp_pdf, watermark)
         with fitz.open(tmp_pdf) as doc:
             doc[0].get_pixmap(dpi=dpi).save(out_path)
         _autocrop_whitespace(out_path)

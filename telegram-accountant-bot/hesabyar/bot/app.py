@@ -63,6 +63,16 @@ async def _on_startup(application: Application) -> None:
 
     store.on_flush_error = _alert
 
+    # نام کاربری بات برای امضای پای فاکتور (اگر در .env نیامده باشد).
+    username = settings.bot_username
+    if not username:
+        try:
+            me = await application.bot.get_me()
+            username = me.username or ""
+        except Exception:  # noqa: BLE001 - نبودِ نام کاربری سند را نمی‌شکند
+            username = ""
+    application.bot_data["bot_username"] = username
+
     # منوی دستورات تلگرام (دکمه‌ی «/») برای کشف‌پذیری بهتر.
     try:
         await application.bot.set_my_commands([

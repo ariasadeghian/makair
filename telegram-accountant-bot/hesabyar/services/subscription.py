@@ -11,7 +11,7 @@ from typing import Optional
 from ..core import jalali, money
 from ..db.models import Payment, PaymentStatus, Subscription
 from ..db.store import Store
-from ..plans import TRIAL_DAYS, get_plan
+from ..plans import TRIAL_DAYS, get_plan, plan_has_feature, tier_label, tier_of
 
 
 def _as_aware(value: Optional[dt.datetime]) -> Optional[dt.datetime]:
@@ -116,6 +116,34 @@ async def extend(
     sub.is_trial = False
     await store.update("subscriptions", sub)
     return sub
+
+
+def current_tier(store: Store, user_id: int, now: Optional[dt.datetime] = None) -> str:
+    """سطحِ فعلیِ کاربر؛ اگر اشتراک فعال نباشد پایین‌ترین سطح."""
+    now = now or jalali.now()
+    sub = _get(store, user_id)
+    if sub is None or not is_active(store, user_id, now):
+        return "bronze"
+    return tier_of(sub.plan)
+
+
+def has_feature(
+    store: Store, user_id: int, feature: str, now: Optional[dt.datetime] = None
+) -> bool:
+    """آیا کاربر با اشتراکِ فعلی‌اش به این قابلیت دسترسی دارد؟
+
+    اشتراکِ منقضی مثل سطحِ برنزی رفتار می‌کند (نه قطعِ کامل) تا کاربر همچنان
+    بتواند داده‌اش را ببیند.
+    """
+    now = now or jalali.now()
+    sub = _get(store, user_id)
+    if sub is None or not is_active(store, user_id, now):
+        return plan_has_feature("", feature)  # سطح برنزی
+    return plan_has_feature(sub.plan, feature)
+
+
+def tier_label_for(store: Store, user_id: int) -> str:
+    return tier_label(current_tier(store, user_id))
 
 
 def build_value_recap(store: Store, user_id: int) -> str:

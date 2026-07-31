@@ -88,6 +88,9 @@ class Settings:
     # کانالی که نرخ روزانه‌ی دلار را می‌گذارد. بات باید ادمینِ آن باشد تا
     # پست‌ها را ببیند. خالی = فقط ثبت دستی با /rate.
     rate_channel_id: int | None = None
+    # نام کاربری بات (برای امضای پای فاکتور در سطح برنزی). اگر خالی بماند
+    # هنگام اجرا خودکار از تلگرام گرفته می‌شود.
+    bot_username: str = ""
     # پرداخت کارت‌به‌کارت اشتراک
     card_number: str = ""
     card_holder: str = ""
@@ -188,6 +191,7 @@ def load_settings(require_token: bool = True) -> Settings:
         stt_language=_get("STT_LANGUAGE", "fa"),
         admin_ids=admin_ids,
         rate_channel_id=_get_int("RATE_CHANNEL_ID", 0) or None,
+        bot_username=(_get("BOT_USERNAME", "") or "").lstrip("@"),
         card_number=_get("CARD_NUMBER", ""),
         card_holder=_get("CARD_HOLDER", ""),
         trial_days=_get_int("TRIAL_DAYS", 14),

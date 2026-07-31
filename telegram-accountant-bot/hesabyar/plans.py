@@ -1,25 +1,113 @@
-"""پلن‌های اشتراک و مدت آزمایش.
+"""پلن‌های اشتراک: سه سطح (برنزی/نقره‌ای/طلایی) در دو مدت.
 
-قیمت‌ها به «تومان» و قابل‌تنظیم‌اند. مدل قیمت‌گذاری بر اساس همان بازار
-هدف (کسب‌وکارهای خرد ایرانی): ماهی حدود ۲۰۰ هزار تومان با تخفیف برای
-دوره‌های بلندتر.
+منطق سطح‌بندی: هسته‌ی محصول (ثبت، گزارش، دفتر طلب و بدهی، یادآوری) در
+**همه‌ی** سطح‌ها باز است تا کاربر از روز اول ارزش را حس کند؛ چیزهایی که هزینه‌ی
+سرویس دارند (ویس، خواندن عکس) یا برای کسب‌وکار جدی‌ترند (گروه/شعبه، نمای دلاری)
+در سطح‌های بالاتر باز می‌شوند.
+
+در سطح برنزی، پای فاکتور و صورتحساب یک امضای کوچکِ بات می‌آید — هم انگیزه‌ی
+ارتقا می‌سازد و هم بات را جلوی مشتریانِ کاربر معرفی می‌کند.
 """
 from __future__ import annotations
 
 #: مدت دوره‌ی آزمایشی رایگان (روز)
 TRIAL_DAYS = 14
 
-#: کلید هر پلن به مشخصاتش
-PLANS: dict[str, dict] = {
-    "monthly": {"label": "یک‌ماهه", "days": 30, "price": 200_000},
-    "quarterly": {"label": "سه‌ماهه", "days": 90, "price": 500_000},
-    "yearly": {"label": "یک‌ساله", "days": 365, "price": 1_800_000},
+
+class Feature:
+    """کلیدِ قابلیت‌هایی که بسته به سطحِ اشتراک باز/بسته می‌شوند."""
+
+    NO_WATERMARK = "no_watermark"   # حذف امضای بات از فاکتور و صورتحساب
+    VOICE = "voice"                 # ثبت با پیام صوتی
+    OCR = "ocr"                     # خواندن عکس/فایل فاکتور
+    STATEMENT = "statement"         # کارت صورتحساب طرف‌حساب
+    DOLLAR = "dollar"               # نمای دلاری درآمد
+    GROUP = "group"                 # دفتر مالی گروه/شعبه
+
+
+#: سطح‌ها و قابلیت‌هایشان (هر سطح شاملِ سطح پایین‌تر است).
+TIERS: dict[str, dict] = {
+    "bronze": {
+        "label": "🥉 برنزی",
+        "tagline": "دفترداری روزمره",
+        "features": frozenset(),
+    },
+    "silver": {
+        "label": "🥈 نقره‌ای",
+        "tagline": "بدون امضای بات + ویس و عکس فاکتور",
+        "features": frozenset({
+            Feature.NO_WATERMARK, Feature.VOICE, Feature.OCR, Feature.STATEMENT,
+        }),
+    },
+    "gold": {
+        "label": "🥇 طلایی",
+        "tagline": "همه‌چیز + گروه/شعبه و نمای دلاری",
+        "features": frozenset({
+            Feature.NO_WATERMARK, Feature.VOICE, Feature.OCR, Feature.STATEMENT,
+            Feature.DOLLAR, Feature.GROUP,
+        }),
+    },
 }
 
-#: ترتیب نمایش پلن‌ها
-PLAN_ORDER = ["monthly", "quarterly", "yearly"]
+#: ترتیب نمایش سطح‌ها (از پایین به بالا)
+TIER_ORDER = ["bronze", "silver", "gold"]
+
+#: کلید هر پلن به مشخصاتش. کلید = "{tier}_{duration}"
+PLANS: dict[str, dict] = {
+    "bronze_monthly": {"tier": "bronze", "label": "🥉 برنزی — ماهانه",
+                       "days": 30, "price": 100_000},
+    "bronze_yearly": {"tier": "bronze", "label": "🥉 برنزی — یک‌ساله",
+                      "days": 365, "price": 900_000},
+    "silver_monthly": {"tier": "silver", "label": "🥈 نقره‌ای — ماهانه",
+                       "days": 30, "price": 200_000},
+    "silver_yearly": {"tier": "silver", "label": "🥈 نقره‌ای — یک‌ساله",
+                      "days": 365, "price": 1_800_000},
+    "gold_monthly": {"tier": "gold", "label": "🥇 طلایی — ماهانه",
+                     "days": 30, "price": 350_000},
+    "gold_yearly": {"tier": "gold", "label": "🥇 طلایی — یک‌ساله",
+                    "days": 365, "price": 3_200_000},
+}
+
+#: ترتیب نمایش پلن‌ها در کیبورد
+PLAN_ORDER = [
+    "bronze_monthly", "bronze_yearly",
+    "silver_monthly", "silver_yearly",
+    "gold_monthly", "gold_yearly",
+]
+
+#: سطحِ دوره‌ی آزمایشی — کاربر جدید همه‌چیز را می‌بیند تا ارزش را بچشد.
+TRIAL_TIER = "gold"
 
 
 def get_plan(key: str) -> dict | None:
     """مشخصات یک پلن را برمی‌گرداند (یا ``None`` اگر نامعتبر باشد)."""
     return PLANS.get(key)
+
+
+def tier_of(plan_key: str) -> str:
+    """سطحِ یک پلن؛ برای «trial» سطحِ آزمایشی و برای نامعتبر «bronze»."""
+    if plan_key == "trial":
+        return TRIAL_TIER
+    plan = PLANS.get(plan_key)
+    return plan["tier"] if plan else "bronze"
+
+
+def tier_features(tier: str) -> frozenset[str]:
+    """قابلیت‌های یک سطح."""
+    info = TIERS.get(tier)
+    return info["features"] if info else frozenset()
+
+
+def plan_has_feature(plan_key: str, feature: str) -> bool:
+    """آیا این پلن قابلیتِ خواسته‌شده را دارد؟"""
+    return feature in tier_features(tier_of(plan_key))
+
+
+def tier_label(tier: str) -> str:
+    info = TIERS.get(tier)
+    return info["label"] if info else tier
+
+
+def plans_for_tier(tier: str) -> list[str]:
+    """کلیدِ پلن‌های یک سطح، به ترتیب نمایش."""
+    return [k for k in PLAN_ORDER if PLANS[k]["tier"] == tier]
