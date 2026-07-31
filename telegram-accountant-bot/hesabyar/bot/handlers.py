@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 import re
 import tempfile
@@ -49,6 +50,8 @@ from ..services import subscription as sub_service
 from ..services import transactions as tx_service
 from . import keyboards, texts
 
+logger = logging.getLogger(__name__)
+
 _ITEM_SPLIT = re.compile(r"[×✕xX*]")
 
 
@@ -75,6 +78,16 @@ def _kind_label(kind: str) -> str:
 
 def _kind_icon(kind: str) -> str:
     return texts.TX_INCOME_ICON if kind == Kind.INCOME else texts.TX_EXPENSE_ICON
+
+
+def _paywall_text(store, uid: int) -> str:
+    """پیامِ نیاز به اشتراک: شخصی‌شده با خلاصه‌ی ارزشی که کاربر گرفته."""
+    parts = [texts.SUB_REQUIRED]
+    recap = sub_service.build_value_recap(store, uid)
+    if recap:
+        parts.append(recap)
+    parts.append(texts.SUB_DATA_SAFE)
+    return "\n\n".join(parts)
 
 
 def _clear_flow(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -508,7 +521,8 @@ async def _log_transaction(update, context, text: str) -> None:
         if not sub_service.is_active(session, uid):
             session.commit()
             return await update.message.reply_text(
-                texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
+                _paywall_text(session, uid),
+                reply_markup=keyboards.subscription_plans(),
             )
         # دسته‌ی دقیق‌ترِ صنفی (اگر کاربر صنفش را انتخاب کرده باشد)
         category = industries.refine_category(
@@ -568,7 +582,36 @@ async def on_ledger_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await tx_service.get_or_create_user(session, uid)
             session.commit()
             report = ledger_service.build_ledger_report(session, uid)
-        return await query.edit_message_text(report)
+            open_entries = ledger_service.list_open(session, uid)
+        markup = keyboards.ledger_settle_list(open_entries)
+        if markup is not None:
+            report += texts.LEDGER_SETTLE_HINT
+        return await query.edit_message_text(
+            report, parse_mode="HTML", reply_markup=markup
+        )
+
+    if action == "settle":
+        try:
+            entry_id = int(parts[2])
+        except (IndexError, ValueError):
+            return
+        with _session(context) as session:
+            entry = await ledger_service.settle(session, entry_id, uid, jalali.now())
+            if entry is not None:
+                await session.flush()  # تسویه، پول‌محور است؛ فوری روی شیت
+            report = ledger_service.build_ledger_report(session, uid)
+            open_entries = ledger_service.list_open(session, uid)
+        if entry is None:
+            return await query.answer(texts.LEDGER_SETTLE_GONE, show_alert=True)
+        await query.answer(
+            texts.LEDGER_SETTLED.format(
+                party=entry.party_name, amount=money.format_amount(entry.amount)
+            )
+        )
+        markup = keyboards.ledger_settle_list(open_entries)
+        if markup is not None:
+            report += texts.LEDGER_SETTLE_HINT
+        return await _safe_edit_html(query, report, reply_markup=markup)
 
     if action == "statement":
         context.user_data["flow"] = "statement_party"
@@ -899,16 +942,11 @@ async def _finalize_invoice(update, context) -> None:
     if not active:
         _clear_flow(context)
         return await context.bot.send_message(
-            chat_id, texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
+            chat_id, _paywall_text(_store(context), uid),
+            reply_markup=keyboards.subscription_plans(),
         )
 
     await context.bot.send_message(chat_id, texts.INVOICE_GENERATING)
-    payment_note = ""
-    if settings.card_number:
-        holder = f" به نام {settings.card_holder}" if settings.card_holder else ""
-        payment_note = f"پرداخت: کارت‌به‌کارت به {settings.card_number}{holder}"
-
-    img_path = pdf_path = None
     try:
         with _session(context) as session:
             user = await tx_service.get_or_create_user(session, uid)
@@ -919,30 +957,77 @@ async def _finalize_invoice(update, context) -> None:
                 shipping=int(inv.get("shipping", 0)),
             )
             await session.flush()  # فاکتور را فوری روی شیت بنویس
-            number, invoice_id = invoice.number, invoice.id
-            img_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice_id}.png")
-            pdf_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice_id}.pdf")
-            render_invoice_image(invoice, user, img_path, payment_note)
-            render_invoice_pdf(invoice, user, pdf_path, payment_note)
+        await _send_invoice_files(
+            context, chat_id, invoice, user,
+            caption=texts.INVOICE_DONE.format(number=invoice.number),
+        )
+    finally:
+        _clear_flow(context)
+
+
+async def _send_invoice_files(context, chat_id, invoice, user, caption: str) -> None:
+    """عکس + PDF یک فاکتور را می‌سازد و می‌فرستد (صدور اولیه یا ارسال دوباره)."""
+    settings = context.application.bot_data["settings"]
+    payment_note = ""
+    if settings.card_number:
+        holder = f" به نام {settings.card_holder}" if settings.card_holder else ""
+        payment_note = f"پرداخت: کارت‌به‌کارت به {settings.card_number}{holder}"
+
+    img_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice.id}.png")
+    pdf_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice.id}.pdf")
+    try:
+        render_invoice_image(invoice, user, img_path, payment_note)
+        render_invoice_pdf(invoice, user, pdf_path, payment_note)
         with open(img_path, "rb") as fh:
             await context.bot.send_photo(
-                chat_id, photo=fh,
-                caption=texts.INVOICE_DONE.format(number=number),
-                reply_markup=keyboards.moadian_send(invoice_id),
+                chat_id, photo=fh, caption=caption,
+                reply_markup=keyboards.moadian_send(invoice.id),
             )
         with open(pdf_path, "rb") as fh:
             await context.bot.send_document(
-                chat_id, document=fh, filename=f"factor-{number}.pdf",
+                chat_id, document=fh, filename=f"factor-{invoice.number}.pdf",
                 reply_markup=keyboards.main_menu(),
             )
     finally:
-        _clear_flow(context)
         for p in (img_path, pdf_path):
             if p and os.path.exists(p):
                 try:
                     os.remove(p)
                 except OSError:
                     pass
+
+
+async def invoices_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دستور /invoices — فاکتورهای اخیر برای ارسال دوباره."""
+    uid = update.effective_user.id
+    with _session(context) as session:
+        await tx_service.get_or_create_user(session, uid)
+        invoices = invoice_service.list_invoices(session, uid, limit=10)
+    if not invoices:
+        return await update.message.reply_text(texts.INVOICE_LIST_EMPTY)
+    await update.message.reply_text(
+        texts.INVOICE_LIST_HEADER, reply_markup=keyboards.invoice_history(invoices)
+    )
+
+
+async def on_invoice_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """لمسِ یک فاکتور در تاریخچه ⇒ ارسال دوباره‌ی عکس و PDF همان فاکتور."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        invoice_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+    uid = update.effective_user.id
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        invoice = invoice_service.get_invoice(session, invoice_id, uid)
+    if invoice is None:
+        return
+    await _send_invoice_files(
+        context, update.effective_chat.id, invoice, user,
+        caption=texts.INVOICE_RESENT.format(number=invoice.number),
+    )
 
 
 # --- کالاهای ذخیره‌شده --------------------------------------------------------
@@ -1191,6 +1276,16 @@ async def _safe_edit(query, text: str, reply_markup=None) -> None:
             pass
 
 
+async def _safe_edit_html(query, text: str, reply_markup=None) -> None:
+    """مثل :func:`_safe_edit` ولی با parse_mode=HTML."""
+    try:
+        await query.edit_message_text(
+            text, parse_mode="HTML", reply_markup=reply_markup
+        )
+    except Exception:
+        pass
+
+
 # --- پرداخت آنلاین (زرین‌پال) -------------------------------------------------
 
 
@@ -1353,7 +1448,8 @@ async def _process_receipt_image(
         if not sub_service.is_active(session, uid):
             session.commit()
             return await update.message.reply_text(
-                texts.SUB_REQUIRED, reply_markup=keyboards.subscription_plans()
+                _paywall_text(session, uid),
+                reply_markup=keyboards.subscription_plans(),
             )
         category = industries.refine_category(
             extracted, parsed.kind, user.business_type, parsed.category
@@ -1752,6 +1848,17 @@ async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _grp_edit(query, f"{head}\n\n{report}")
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """خطای گرفته‌نشده: لاگ کامل + پیام مؤدبانه به کاربر (به‌جای سکوت)."""
+    logger.exception("خطای گرفته‌نشده در هندلر", exc_info=context.error)
+    message = getattr(update, "effective_message", None)
+    if message is not None:
+        try:
+            await message.reply_text(texts.GENERIC_ERROR)
+        except Exception:  # noqa: BLE001 - پیام خطا هم نرفت؛ همان لاگ کافی است
+            pass
+
+
 # --- ثبت هندلرها --------------------------------------------------------------
 
 
@@ -1769,6 +1876,7 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("balance", balance_cmd))
     application.add_handler(CommandHandler("pilot", pilot_cmd))
     application.add_handler(CommandHandler("industry", industry_cmd))
+    application.add_handler(CommandHandler("invoices", invoices_cmd))
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
@@ -1784,6 +1892,8 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
     application.add_handler(CallbackQueryHandler(on_industry, pattern=r"^ind:"))
+    application.add_handler(CallbackQueryHandler(on_invoice_history, pattern=r"^invh:"))
+    application.add_error_handler(on_error)
     # پیام‌های خصوصی (۱:۱) — جریان‌های شخصیِ کاربر
     private = filters.ChatType.PRIVATE
     application.add_handler(MessageHandler(filters.PHOTO & private, on_photo))

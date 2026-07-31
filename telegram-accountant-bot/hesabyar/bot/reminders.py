@@ -12,7 +12,8 @@ from ..db.models import Direction
 from ..services import backup as backup_service
 from ..services import ledger as ledger_service
 from ..services import reports as report_service
-from . import texts
+from ..services import subscription as sub_service
+from . import keyboards, texts
 
 
 def _entry_line(entry) -> str:
@@ -77,7 +78,9 @@ async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
         try:
             await context.bot.send_message(
-                chat_id=user_id, text=text, parse_mode="HTML"
+                chat_id=user_id, text=text, parse_mode="HTML",
+                # همان‌جا قابلِ بستن: یادآوری بدونِ راهِ عمل، فقط غر زدن است.
+                reply_markup=keyboards.ledger_settle_list(items),
             )
         except Exception:
             continue
@@ -109,6 +112,32 @@ async def weekly_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
                 os.remove(out_path)
             except OSError:
                 pass
+
+
+async def send_subscription_notices(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """هشدارِ نزدیک‌شدن به پایانِ اشتراک (۳ روز و ۱ روز مانده) و پیامِ انقضا.
+
+    پیام شخصی‌سازی می‌شود (خلاصه‌ی ارزشِ ثبت‌شده) و دکمه‌های پلن همراهش می‌آید تا
+    تمدید یک لمس باشد.
+    """
+    store = context.application.bot_data["store"]
+    now = jalali.now()
+    for user_id, kind in sub_service.subs_needing_notice(store, now):
+        recap = sub_service.build_value_recap(store, user_id)
+        if kind == "expired":
+            text = texts.SUB_EXPIRED_NOTICE.format(
+                recap=recap, safe=texts.SUB_DATA_SAFE
+            )
+        else:
+            days = money.to_persian_digits(kind.removeprefix("warn"))
+            text = texts.SUB_WARN.format(days=days, recap=recap)
+        try:
+            await context.bot.send_message(
+                chat_id=user_id, text=text, parse_mode="HTML",
+                reply_markup=keyboards.subscription_plans(),
+            )
+        except Exception:
+            continue
 
 
 async def send_nightly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:

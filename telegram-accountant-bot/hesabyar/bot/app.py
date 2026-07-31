@@ -69,6 +69,7 @@ async def _on_startup(application: Application) -> None:
             BotCommand("start", "شروع / منوی اصلی"),
             BotCommand("help", "راهنما"),
             BotCommand("list", "تراکنش‌های اخیر"),
+            BotCommand("invoices", "فاکتورهای اخیر (ارسال دوباره)"),
             BotCommand("dashboard", "داشبورد تصویری"),
             BotCommand("export", "خروجی اکسل"),
             BotCommand("backup", "پشتیبان کامل"),
@@ -117,6 +118,12 @@ def build_application(settings: Settings) -> Application:
         )
         job_queue.run_daily(
             reminders.send_due_reminders, time=run_at, name="due_reminders"
+        )
+        # هشدارهای اشتراک (۳ روز/۱ روز مانده و انقضا) — همان ساعتِ یادآوری روزانه
+        job_queue.run_daily(
+            reminders.send_subscription_notices,
+            time=run_at,
+            name="subscription_notices",
         )
         if settings.backup_weekly:
             job_queue.run_repeating(

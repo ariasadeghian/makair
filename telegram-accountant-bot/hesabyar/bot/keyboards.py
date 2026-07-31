@@ -124,6 +124,34 @@ def category_picker(transaction_id: int, kind: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def ledger_settle_list(entries) -> InlineKeyboardMarkup | None:
+    """دکمه‌ی «تسویه شد» برای هر ردیفِ بازِ دفتر (حداکثر ۱۰ ردیف).
+
+    اگر ردیفی نباشد ``None`` برمی‌گرداند تا کیبوردِ خالی نفرستیم.
+    """
+    rows: list = []
+    for e in list(entries)[:10]:
+        tag = "🧾 " if getattr(e, "is_cheque", False) else ""
+        label = (
+            f"✅ تسویه: {tag}{e.party_name} — "
+            f"{format_amount(e.amount, with_currency=False)}"
+        )
+        rows.append([InlineKeyboardButton(label, callback_data=f"ledger:settle:{e.id}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def invoice_history(invoices) -> InlineKeyboardMarkup | None:
+    """فهرست فاکتورهای اخیر؛ لمسِ هر کدام = ارسال دوباره‌ی عکس و PDF."""
+    rows: list = []
+    for inv in list(invoices)[:10]:
+        label = (
+            f"🧾 {inv.number} — {inv.customer_name} — "
+            f"{format_amount(inv.total, with_currency=False)}"
+        )
+        rows.append([InlineKeyboardButton(label, callback_data=f"invh:{inv.id}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
 def industry_picker() -> InlineKeyboardMarkup:
     """انتخابگر صنفِ کسب‌وکار (یک دکمه در هر ردیف تا متن‌ها جا شوند)."""
     rows = [

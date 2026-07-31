@@ -118,6 +118,55 @@ async def extend(
     return sub
 
 
+def build_value_recap(store: Store, user_id: int) -> str:
+    """خلاصه‌ی ارزشی که کاربر تا امروز از بات گرفته (برای پیام تمدید).
+
+    اگر هنوز چیزی ثبت نکرده باشد رشته‌ی خالی برمی‌گرداند تا پیامِ خالی نفرستیم.
+    """
+    fa = money.to_persian_digits
+    tx_count = len(store.list("transactions", lambda t: t.user_id == user_id))
+    inv_count = len(store.list("invoices", lambda i: i.user_id == user_id))
+    ledger_count = len(store.list("ledger_entries", lambda e: e.user_id == user_id))
+    if not (tx_count or inv_count or ledger_count):
+        return ""
+    parts = []
+    if tx_count:
+        parts.append(f"{fa(str(tx_count))} تراکنش")
+    if inv_count:
+        parts.append(f"{fa(str(inv_count))} فاکتور")
+    if ledger_count:
+        parts.append(f"{fa(str(ledger_count))} طلب/بدهی")
+    return "تا امروز " + "، ".join(parts) + " اینجا ثبت کرده‌ای. 📚"
+
+
+#: روزهای مانده‌ای که در آن‌ها هشدارِ اتمام می‌فرستیم.
+WARN_DAYS = (3, 1)
+
+
+def subs_needing_notice(
+    store: Store, now: Optional[dt.datetime] = None
+) -> list[tuple[int, str]]:
+    """کاربرانی که امروز باید پیامِ اشتراک بگیرند: ``[(user_id, kind), ...]``.
+
+    ``kind`` یکی از ``"warn3"``، ``"warn1"`` یا ``"expired"`` است. چون job
+    روزی یک‌بار اجرا می‌شود، هر حالت برای هر کاربر عملاً یک‌بار رخ می‌دهد
+    (منقضی‌شدن فقط در ۲۴ ساعتِ اولِ پس از انقضا گزارش می‌شود).
+    """
+    now = now or jalali.now()
+    notices: list[tuple[int, str]] = []
+    for sub in store.list("subscriptions", lambda s: True):
+        expires = _as_aware(sub.expires_at)
+        if expires is None:
+            continue
+        if expires > now:
+            days = (expires.date() - now.date()).days
+            if days in WARN_DAYS:
+                notices.append((sub.user_id, f"warn{days}"))
+        elif now - expires <= dt.timedelta(hours=24):
+            notices.append((sub.user_id, "expired"))
+    return notices
+
+
 # --- پرداخت -------------------------------------------------------------------
 
 
