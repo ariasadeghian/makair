@@ -31,7 +31,11 @@ async def _on_startup(application: Application) -> None:
             spreadsheet = await asyncio.to_thread(
                 sheets_client.open_spreadsheet, client, settings.google_sheet_id
             )
-            store = Store(spreadsheet)
+            store = Store(
+                spreadsheet,
+                client=client,
+                folder_id=settings.drive_parent_folder_id,
+            )
             await store.load()
             break
         except Exception as exc:  # noqa: BLE001

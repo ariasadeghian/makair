@@ -123,11 +123,19 @@ cp .env.example .env
 > **آماده‌سازی Google Sheets (یک‌بار):** در [Google Cloud](https://console.cloud.google.com)
 > یک پروژه بسازید، **Google Sheets API** و **Google Drive API** را فعال کنید،
 > یک **Service Account** با کلید JSON بسازید، یک اسپردشیت خالی درست کنید و آن را
-> با ایمیل سرویس‌اکانت به‌عنوان **Editor** به اشتراک بگذارید. ۱۲ تب (users،
-> transactions، ledger_entries، invoices، invoice_items، subscriptions،
-> payments، products، group_events، rates، branches، branch_members) خودکار در
-> اولین اجرا ساخته می‌شوند.
+> با ایمیل سرویس‌اکانت به‌عنوان **Editor** به اشتراک بگذارید.
 > **فایل JSON را هیچ‌وقت داخل مخزن commit نکنید؛** فقط از متغیر محیطی خوانده می‌شود.
+
+> 🗂 **معماری داده — یک اسپردشیت برای هر کسب‌وکار:**
+> اسپردشیتِ بالا **مرکزی** است و فقط رجیستری را نگه می‌دارد: `users`،
+> `subscriptions`، `payments`، `rates`، `branches`، `branch_members`، `sequences`.
+> هنگام اولین `/start`، برای هر کاربر یک **اسپردشیت اختصاصی** ساخته می‌شود که
+> دفترِ خودش است: `transactions`، `ledger_entries`، `invoices`، `invoice_items`،
+> `products`، `group_events`. شناسه‌اش در ستون `sheet_id` رجیستری ذخیره می‌شود.
+>
+> برای این کار `DRIVE_PARENT_FOLDER_ID` را تنظیم کنید: یک پوشه در Drive خودتان
+> بسازید و آن را با ایمیل سرویس‌اکانت **Editor** کنید. (سرویس‌اکانت به‌تنهایی
+> کوتای Drive ندارد و بدون پوشه‌ی والد، ساختِ فایل شکست می‌خورد.)
 
 داده در حافظه نگه داشته می‌شود و هر ۵ ثانیه دسته‌ای روی شیت نوشته می‌شود، پس
 خواندن‌ها سریع‌اند و به Rate Limit گوگل نمی‌خورند.

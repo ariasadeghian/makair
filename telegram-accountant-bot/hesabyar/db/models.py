@@ -102,7 +102,7 @@ class User:
     TABLE = "users"
     COLUMNS = (
         "id", "business_name", "phone", "address", "currency", "created_at",
-        "business_type",
+        "business_type", "sheet_id",
     )
 
     id: Optional[int] = None
@@ -113,12 +113,14 @@ class User:
     created_at: Optional[dt.datetime] = None
     #: کلیدِ صنفِ کسب‌وکار (hesabyar.core.industries)؛ خالی = نامشخص.
     business_type: str = ""
+    #: شناسه‌ی اسپردشیتِ اختصاصیِ همین کاربر (دفترِ خودش).
+    sheet_id: Optional[str] = None
 
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.business_name), _s(self.phone),
             _s(self.address), _s(self.currency), _s(self.created_at),
-            _s(self.business_type),
+            _s(self.business_type), _s(self.sheet_id),
         ]
 
     @classmethod
@@ -131,6 +133,7 @@ class User:
             currency=(d.get("currency") or "تومان"),
             created_at=_pdt(d.get("created_at")),
             business_type=_pstr(d.get("business_type")),
+            sheet_id=(d.get("sheet_id") or None),
         )
 
 
@@ -596,10 +599,55 @@ class BranchMember:
         )
 
 
-#: همه‌ی مدل‌ها به ترتیب تب‌ها (برای ساخت تب‌ها و بارگذاری).
-ALL_MODELS = (
-    User, Transaction, LedgerEntry, Invoice, InvoiceItem,
-    Subscription, Payment, Product, GroupEvent, Rate,
-    Branch, BranchMember,
-)
+@dataclass
+class Sequence:
+    """شمارنده‌ی شناسه‌ی هر جدول (در اسپردشیت مرکزی).
+
+    چون داده‌ی هر کاربر در اسپردشیت جداگانه‌ای است، بدون یک شمارنده‌ی مرکزی
+    ممکن بود دو کاربر شناسه‌ی یکسان بگیرند و در حافظه روی هم بیفتند.
+    """
+
+    TABLE = "sequences"
+    COLUMNS = ("id", "name", "last_id")
+
+    id: Optional[int] = None
+    name: str = ""
+    last_id: int = 0
+
+    def to_row(self) -> list:
+        return [_s(self.id), _s(self.name), _s(self.last_id)]
+
+    @classmethod
+    def from_row(cls, d: dict) -> "Sequence":
+        return cls(
+            id=_pint(d.get("id")),
+            name=_pstr(d.get("name")),
+            last_id=_pint(d.get("last_id")) or 0,
+        )
+
+
+#: جدول‌های اسپردشیتِ **مرکزی** — لایه‌ی حساب/رجیستری.
+#: این‌ها عمداً مرکزی‌اند چون کوئری‌شان ذاتاً بین‌کاربری است: ادمین پرداختی را
+#: فقط با شناسه‌اش تأیید می‌کند، کارمند با «کد» به شعبه می‌پیوندد (هنوز مالک
+#: را نمی‌شناسیم)، و نرخ دلار سراسری است.
+CENTRAL_MODELS = (User, Subscription, Payment, Rate, Branch, BranchMember, Sequence)
+
+#: جدول‌های اسپردشیتِ **اختصاصیِ هر کاربر** — دفترِ واقعیِ کسب‌وکار.
+USER_MODELS = (Transaction, LedgerEntry, Invoice, InvoiceItem, Product, GroupEvent)
+
+#: همه‌ی مدل‌ها (برای سازگاری و ابزارهای عمومی).
+ALL_MODELS = CENTRAL_MODELS + USER_MODELS
 TABLE_MODELS = {m.TABLE: m for m in ALL_MODELS}
+
+CENTRAL_TABLES = frozenset(m.TABLE for m in CENTRAL_MODELS)
+USER_TABLES = frozenset(m.TABLE for m in USER_MODELS)
+
+#: نامِ فیلدی که «مالکِ» هر ردیف را در جدول‌های اختصاصی مشخص می‌کند.
+#: ``invoice_items`` فیلد مالک ندارد و از روی فاکتورش حل می‌شود.
+OWNER_FIELD = {
+    "transactions": "user_id",
+    "ledger_entries": "user_id",
+    "invoices": "user_id",
+    "products": "user_id",
+    "group_events": "chat_id",
+}

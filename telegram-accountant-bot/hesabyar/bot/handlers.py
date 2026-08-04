@@ -1737,6 +1737,7 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if chat is None or chat.type not in ("group", "supergroup"):
         return await update.message.reply_text(texts.GROUP_PRIVATE_ONLY)
     store = _store(context)
+    await tx_service.get_or_create_user(store, chat.id, chat.title or "")
     parts = []
     # دفترِ خودِ گروه (فروش/هزینه‌ها) اگر چیزی ثبت شده باشد
     start, end = jalali.month_bounds(jalali.now())
@@ -1753,6 +1754,7 @@ async def pilot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if uid not in settings.admin_ids:
         return await update.message.reply_text(texts.ADMIN_NOT_ALLOWED)
     store = _store(context)
+    await store.load_all_users()  # سنجه‌ها بین‌کاربری‌اند
     metrics = pilot_service.compute_pilot_metrics(store, jalali.now())
     await update.message.reply_text(
         pilot_service.build_pilot_report(metrics), parse_mode="HTML"
@@ -1783,7 +1785,7 @@ async def _offer_group_transaction(
         return  # گپِ معمولیِ گروه؛ سکوت کن
 
     store = _store(context)
-    group = store.get("users", msg.chat_id)
+    group = await tx_service.get_or_create_user(store, msg.chat_id, msg.chat.title or "")
     category = industries.refine_category(
         text, parsed.kind, getattr(group, "business_type", "") if group else "",
         parsed.category,
@@ -1851,6 +1853,8 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     chat_id = msg.chat_id
     store = _store(context)
+    # دفترِ گروه (گروه هم مثل یک کاربر، اسپردشیت خودش را دارد)
+    await tx_service.get_or_create_user(store, chat_id, msg.chat.title or "")
     cp_id, cp_name = _mentioned_party(msg)
     pending = {
         "kind": parsed.kind,

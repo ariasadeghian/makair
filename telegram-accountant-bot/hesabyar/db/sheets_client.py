@@ -7,13 +7,16 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import time
-from typing import Callable
+from typing import Callable, Optional, Sequence
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 from .models import ALL_MODELS
+
+logger = logging.getLogger(__name__)
 
 _SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -59,10 +62,35 @@ def with_retry(fn: Callable) -> Callable:
 
 
 @with_retry
-def ensure_worksheets(spreadsheet) -> None:
-    """به‌صورت idempotent هر ۸ تب را (با سطر هدر) در صورت نبود می‌سازد."""
-    existing = {ws.title: ws for ws in spreadsheet.worksheets()}
-    for model in ALL_MODELS:
+def create_user_spreadsheet(
+    client: gspread.Client, title: str, folder_id: Optional[str] = None
+) -> str:
+    """یک اسپردشیت تازه برای یک کاربر می‌سازد و شناسه‌اش را برمی‌گرداند.
+
+    اگر ``folder_id`` بدهیم، فایل داخل همان پوشه‌ی Drive ساخته می‌شود. این
+    حالت توصیه‌شده است: سرویس‌اکانت به‌تنهایی کوتای Drive ندارد، پس باید در
+    پوشه‌ای بسازد که مالکش یک اکانت واقعی است و به سرویس‌اکانت Editor داده.
+    """
+    if folder_id:
+        spreadsheet = client.create(title, folder_id=folder_id)
+    else:
+        logger.warning(
+            "DRIVE_PARENT_FOLDER_ID تنظیم نشده؛ ساخت اسپردشیت ممکن است با "
+            "خطای کوتای Drive شکست بخورد."
+        )
+        spreadsheet = client.create(title)
+    return spreadsheet.id
+
+
+@with_retry
+def ensure_worksheets(spreadsheet, models: Optional[Sequence] = None) -> None:
+    """به‌صورت idempotent تب‌های خواسته‌شده را (با سطر هدر) می‌سازد.
+
+    ``models`` را می‌دهیم تا اسپردشیت مرکزی فقط تب‌های رجیستری و اسپردشیت هر
+    کاربر فقط تب‌های دفترِ خودش را داشته باشد. پیش‌فرض: همه‌ی مدل‌ها.
+    """
+    for model in (models if models is not None else ALL_MODELS):
+        existing = {ws.title: ws for ws in spreadsheet.worksheets()}
         header = list(model.COLUMNS)
         if model.TABLE not in existing:
             ws = spreadsheet.add_worksheet(

@@ -58,7 +58,11 @@ class Settings:
     bot_token: str
     # داده‌ها روی Google Sheets ذخیره می‌شوند (نه دیتابیس محلی).
     google_service_account_json: str = ""  # کل محتوای JSON کلید سرویس‌اکانت
-    google_sheet_id: str = ""  # شناسه‌ی اسپردشیت
+    google_sheet_id: str = ""  # شناسه‌ی اسپردشیتِ مرکزی (رجیستری کاربرها)
+    # پوشه‌ی Drive که اسپردشیتِ اختصاصیِ کاربرها داخلش ساخته می‌شود.
+    # سرویس‌اکانت به‌تنهایی کوتای Drive ندارد، پس فایل باید در پوشه‌ای ساخته
+    # شود که مالکش یک اکانت گوگل واقعی است و به سرویس‌اکانت دسترسی Editor داده.
+    drive_parent_folder_id: str = ""
     default_currency: str = "تومان"
     # ساعت محلی ارسال یادآوری روزانه‌ی سررسیدها (۰ تا ۲۳)
     reminder_hour: int = 9
@@ -172,6 +176,7 @@ def load_settings(require_token: bool = True) -> Settings:
         bot_token=token or "",
         google_service_account_json=google_json,
         google_sheet_id=sheet_id,
+        drive_parent_folder_id=_get("DRIVE_PARENT_FOLDER_ID", "") or "",
         default_currency=_get("DEFAULT_CURRENCY", "تومان"),
         reminder_hour=_get_int("REMINDER_HOUR", 9),
         reminder_minute=_get_int("REMINDER_MINUTE", 0),

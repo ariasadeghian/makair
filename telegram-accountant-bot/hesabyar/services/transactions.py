@@ -16,7 +16,11 @@ from ..db.store import Store
 async def get_or_create_user(
     store: Store, user_id: int, business_name: str | None = None
 ) -> User:
-    """کاربر را برمی‌گرداند و اگر نبود می‌سازد."""
+    """کاربر را برمی‌گرداند و اگر نبود می‌سازد.
+
+    این تابع نقطه‌ی ورودِ تقریباً همه‌ی هندلرهاست، پس همین‌جا مطمئن می‌شویم
+    اسپردشیت اختصاصیِ کاربر وجود دارد و دفترش در حافظه بارگذاری شده است.
+    """
     user = store.get("users", user_id)
     if user is None:
         user = User(id=user_id, business_name=business_name)
@@ -24,6 +28,12 @@ async def get_or_create_user(
     elif business_name and not user.business_name:
         user.business_name = business_name
         await store.update("users", user)
+
+    # دفترِ اختصاصیِ کاربر: بساز اگر نیست، بخوان اگر هنوز در حافظه نیامده.
+    if not user.sheet_id:
+        await store.ensure_user_spreadsheet(user_id, business_name or "")
+    else:
+        await store.load_user(user_id)
     return user
 
 

@@ -64,6 +64,7 @@ def build_reminder_message(items: list, base) -> str:
 async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     """یادآوری سررسیدها: معوق، سررسیدِ امروز، و نزدیک (چند روز مانده)."""
     store = context.application.bot_data["store"]
+    await store.load_all_users()  # این job بین‌کاربری است
     settings = context.application.bot_data.get("settings")
     lead_days = getattr(settings, "reminder_lead_days", 0)
     base = jalali.now()
@@ -102,7 +103,11 @@ async def weekly_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
                     await context.bot.send_document(
                         chat_id=admin_id, document=fh,
                         filename="hesabyar-backup.xlsx",
-                        caption="📦 پشتیبان هفتگی داده‌ها (اکسل).",
+                        caption=(
+                            "📦 پشتیبان هفتگی — رجیستری حساب‌ها (کاربرها، "
+                            "اشتراک‌ها، پرداخت‌ها).\n"
+                            "دفترِ هر کسب‌وکار در اسپردشیت اختصاصیِ خودش است."
+                        ),
                     )
             except Exception:
                 continue
@@ -121,6 +126,7 @@ async def send_subscription_notices(context: ContextTypes.DEFAULT_TYPE) -> None:
     تمدید یک لمس باشد.
     """
     store = context.application.bot_data["store"]
+    await store.load_all_users()  # خلاصه‌ی ارزش از دفترِ هر کاربر خوانده می‌شود
     now = jalali.now()
     for user_id, kind in sub_service.subs_needing_notice(store, now):
         recap = sub_service.build_value_recap(store, user_id)
@@ -143,6 +149,7 @@ async def send_subscription_notices(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def send_nightly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
     """خلاصه‌ی شبانه‌ی فعالیت را برای کاربرانی که «امروز» فعال بوده‌اند می‌فرستد."""
     store = context.application.bot_data["store"]
+    await store.load_all_users()  # این job بین‌کاربری است
     now = jalali.now()
     for user in store.list("users", lambda u: True):
         digest = report_service.build_daily_digest(store, user.id, now)

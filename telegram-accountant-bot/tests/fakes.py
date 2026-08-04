@@ -44,7 +44,8 @@ class FakeWorksheet:
 
 
 class FakeSpreadsheet:
-    def __init__(self):
+    def __init__(self, id: str = "central"):
+        self.id = id
         self._ws: dict[str, FakeWorksheet] = {}
 
     def worksheets(self):
@@ -57,3 +58,23 @@ class FakeSpreadsheet:
         ws = FakeWorksheet(title)
         self._ws[title] = ws
         return ws
+
+
+class FakeClient:
+    """کلاینت ساختگیِ gspread: ساخت و بازکردنِ اسپردشیت‌های اختصاصیِ کاربران."""
+
+    def __init__(self):
+        self.sheets: dict[str, FakeSpreadsheet] = {}
+        self.created: list[tuple[str, str]] = []  # (title, folder_id)
+        self._n = 0
+
+    def create(self, title: str, folder_id: str | None = None) -> FakeSpreadsheet:
+        self._n += 1
+        sheet_id = f"sheet-{self._n}"
+        ss = FakeSpreadsheet(id=sheet_id)
+        self.sheets[sheet_id] = ss
+        self.created.append((title, folder_id or ""))
+        return ss
+
+    def open_by_key(self, sheet_id: str) -> FakeSpreadsheet:
+        return self.sheets[sheet_id]
