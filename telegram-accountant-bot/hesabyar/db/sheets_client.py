@@ -82,6 +82,102 @@ def create_user_spreadsheet(
     return spreadsheet.id
 
 
+# --- ظاهرِ اسپردشیت ------------------------------------------------------------
+#
+# فرمت‌بندی فقط ظاهر است و به داده دست نمی‌زند: ``overwrite_worksheet`` مقدارِ
+# سلول‌ها را پاک و بازنویسی می‌کند ولی فرمتِ سلول را نگه می‌دارد. پس استایل
+# یک‌بار موقعِ ساختِ تب اعمال می‌شود و برای همیشه می‌ماند.
+
+#: قالبِ ردیفِ هدر — یک رنگِ ثابت برای همه‌ی تب‌ها.
+HEADER_FORMAT = {
+    "backgroundColor": {"red": 0.20, "green": 0.29, "blue": 0.37},
+    "horizontalAlignment": "CENTER",
+    "textFormat": {
+        "bold": True,
+        "foregroundColor": {"red": 1, "green": 1, "blue": 1},
+    },
+}
+
+#: ستون‌های پولی/عددی که جداکننده‌ی هزارگان می‌گیرند.
+MONEY_COLUMNS = frozenset({
+    "amount", "unit_price", "usd", "price", "discount", "shipping", "total",
+})
+
+#: ستون‌های متنیِ بلند که باید پهن‌تر باشند.
+WIDE_COLUMNS = frozenset({
+    "description", "address", "note", "party_name", "customer_name",
+    "customer_address", "title", "business_name", "raw_text",
+})
+
+#: پهنای ستونِ متنیِ بلند (پیکسل). پیش‌فرضِ گوگل ۱۰۰ است.
+WIDE_COLUMN_PX = 220
+
+_NUMBER_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}
+
+
+def _col_letter(index: int) -> str:
+    """۱ → ``A``، ۲۷ → ``AA``."""
+    letters = ""
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return letters
+
+
+def _safely(what: str, action: Callable) -> None:
+    """استایل نباید هیچ‌وقت جلوی کار کردنِ بات را بگیرد."""
+    try:
+        action()
+    except Exception as exc:  # noqa: BLE001 - ظاهر است، نه داده
+        logger.warning("استایلِ «%s» اعمال نشد: %s", what, exc)
+
+
+def style_worksheet(ws, header: Sequence[str]) -> None:
+    """ظاهرِ یک تبِ تازه‌ساخته‌شده را مرتب می‌کند.
+
+    هدرِ بولد و رنگی، ردیفِ اول فریزشده، جداکننده‌ی هزارگان روی ستون‌های
+    پولی، و پهنای بیشتر برای ستون‌های متنیِ بلند. ستونی که وجود نداشته
+    باشد بی‌سروصدا رد می‌شود، و هر خطای API فقط لاگ می‌شود — هیچ‌کدام از
+    این‌ها به مقدارِ سلول‌ها دست نمی‌زنند.
+    """
+    columns = [str(c) for c in (header or [])]
+    if not columns:
+        return
+
+    last = _col_letter(len(columns))
+    _safely("هدر", lambda: ws.format(f"A1:{last}1", HEADER_FORMAT))
+    _safely("فریزِ هدر", lambda: ws.freeze(rows=1))
+
+    for index, name in enumerate(columns, start=1):
+        if name in MONEY_COLUMNS:
+            letter = _col_letter(index)
+            _safely(
+                f"عددِ ستون {name}",
+                lambda letter=letter: ws.format(f"{letter}2:{letter}", _NUMBER_FORMAT),
+            )
+
+    wide = [i for i, name in enumerate(columns) if name in WIDE_COLUMNS]
+    if wide:
+        _safely("پهنای ستون‌ها", lambda: _widen_columns(ws, wide))
+
+
+def _widen_columns(ws, indexes: Sequence[int]) -> None:
+    requests = [
+        {
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": ws.id, "dimension": "COLUMNS",
+                    "startIndex": index, "endIndex": index + 1,
+                },
+                "properties": {"pixelSize": WIDE_COLUMN_PX},
+                "fields": "pixelSize",
+            }
+        }
+        for index in indexes
+    ]
+    ws.spreadsheet.batch_update({"requests": requests})
+
+
 @with_retry
 def ensure_worksheets(spreadsheet, models: Optional[Sequence] = None) -> None:
     """به‌صورت idempotent تب‌های خواسته‌شده را (با سطر هدر) می‌سازد.
@@ -97,6 +193,9 @@ def ensure_worksheets(spreadsheet, models: Optional[Sequence] = None) -> None:
                 title=model.TABLE, rows=200, cols=max(len(header), 1)
             )
             ws.append_row(header)
+            # فقط همین‌جا — تبِ موجود دوباره استایل نمی‌خورد تا هر بار
+            # بالا آمدنِ بات چند ده فراخوانیِ اضافه به API نزند.
+            style_worksheet(ws, header)
         elif not existing[model.TABLE].get_all_values():
             existing[model.TABLE].append_row(header)
 

@@ -3,6 +3,9 @@
 رفتار حداقلیِ لازم از gspread را در حافظه شبیه‌سازی می‌کند: ``worksheets``،
 ``worksheet``، ``add_worksheet`` و روی هر تب ``get_all_values``،
 ``get_all_records``، ``append_row``، ``clear`` و ``update``.
+
+فراخوانی‌های ظاهری (``format``، ``freeze``، ``batch_update``) هم ثبت می‌شوند
+تا تست بتواند ثابت کند استایل اعمال شده و به مقدارِ سلول‌ها دست نزده است.
 """
 from __future__ import annotations
 
@@ -12,9 +15,13 @@ def _cell(x) -> str:
 
 
 class FakeWorksheet:
-    def __init__(self, title: str):
+    def __init__(self, title: str, spreadsheet=None, sheet_id: int = 0):
         self.title = title
         self._values: list[list[str]] = []  # سطر اول = هدر
+        self.spreadsheet = spreadsheet
+        self.id = sheet_id
+        self.formats: list = []
+        self.frozen_rows: int = 0
 
     def get_all_values(self):
         return [list(r) for r in self._values]
@@ -42,11 +49,20 @@ class FakeWorksheet:
     def update(self, values, value_input_option=None, range_name=None):
         self._values = [[_cell(x) for x in row] for row in values]
 
+    # --- ظاهر (به مقدارِ سلول‌ها دست نمی‌زنند) ---------------------------------
+
+    def format(self, range_name: str, fmt: dict):
+        self.formats.append((range_name, fmt))
+
+    def freeze(self, rows: int = 0, cols: int = 0):
+        self.frozen_rows = rows
+
 
 class FakeSpreadsheet:
     def __init__(self, id: str = "central"):
         self.id = id
         self._ws: dict[str, FakeWorksheet] = {}
+        self.batch_updates: list = []
 
     def worksheets(self):
         return list(self._ws.values())
@@ -55,9 +71,12 @@ class FakeSpreadsheet:
         return self._ws[title]
 
     def add_worksheet(self, title: str, rows: int = 100, cols: int = 20) -> FakeWorksheet:
-        ws = FakeWorksheet(title)
+        ws = FakeWorksheet(title, spreadsheet=self, sheet_id=len(self._ws) + 1)
         self._ws[title] = ws
         return ws
+
+    def batch_update(self, body: dict):
+        self.batch_updates.append(body)
 
 
 class FakeClient:
