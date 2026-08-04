@@ -12,6 +12,7 @@ from typing import Optional, Sequence, TypedDict
 from ..core import jalali, money
 from ..db.models import Invoice, InvoiceItem
 from ..db.store import Store
+from . import customers
 from .transactions import get_or_create_user
 
 
@@ -50,17 +51,30 @@ async def create_invoice(
     discount: int = 0,
     shipping: int = 0,
     base: dt.datetime | None = None,
+    customer_id: Optional[int] = None,
 ) -> Invoice:
     if base is None:
         base = jalali.now()
     await get_or_create_user(store, user_id)
+
+    # به رکورد مشتری لینک شود تا «رضا» در دو فاکتور، یک نفر باشد.
+    if customer_id is None:
+        customer = await customers.find_or_create_customer(
+            store, user_id, customer_name, customer_phone, customer_address
+        )
+        if customer is not None:
+            customer_id = customer.id
+            customer_name = customer.name
+            customer_phone = customer_phone or customer.phone
+            customer_address = customer_address or customer.address
+
     number, seq = next_invoice_number(store, user_id, base)
     invoice = Invoice(
         user_id=user_id, number=number, seq=seq, customer_name=customer_name,
         customer_phone=customer_phone, customer_address=customer_address,
         issue_date=issue_date, note=note,
         discount=int(discount or 0), shipping=int(shipping or 0),
-        share_token=new_share_token(),
+        share_token=new_share_token(), customer_id=customer_id,
     )
     await store.add("invoices", invoice)
     for item in items:

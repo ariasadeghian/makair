@@ -187,7 +187,7 @@ class LedgerEntry:
     COLUMNS = (
         "id", "user_id", "direction", "party_name", "amount",
         "description", "due_date", "is_settled", "settled_at", "created_at",
-        "instrument", "cheque_no", "party_tg_id",
+        "instrument", "cheque_no", "party_tg_id", "customer_id",
     )
 
     id: Optional[int] = None
@@ -205,6 +205,8 @@ class LedgerEntry:
     #: آیدی تلگرامِ طرف‌حساب (اگر لینک فاکتوری را باز کرده باشد) — برای
     #: فرستادنِ یادآوریِ بدهی مستقیم به خودش.
     party_tg_id: Optional[int] = None
+    #: لینک به رکورد مشتری (party_name برای نمایش/سازگاری می‌ماند)
+    customer_id: Optional[int] = None
 
     @property
     def is_cheque(self) -> bool:
@@ -216,6 +218,7 @@ class LedgerEntry:
             _s(self.amount), _s(self.description), _s(self.due_date),
             _s(self.is_settled), _s(self.settled_at), _s(self.created_at),
             _s(self.instrument), _s(self.cheque_no), _s(self.party_tg_id),
+            _s(self.customer_id),
         ]
 
     @classmethod
@@ -234,6 +237,7 @@ class LedgerEntry:
             instrument=_pstr(d.get("instrument")) or Instrument.CASH,
             cheque_no=_pstr(d.get("cheque_no")),
             party_tg_id=_pint(d.get("party_tg_id")),
+            customer_id=_pint(d.get("customer_id")),
         )
 
 
@@ -275,7 +279,7 @@ class Invoice:
     COLUMNS = (
         "id", "user_id", "number", "seq", "customer_name", "customer_phone",
         "customer_address", "issue_date", "note", "discount", "shipping",
-        "created_at", "share_token", "customer_tg_id", "rating",
+        "created_at", "share_token", "customer_tg_id", "rating", "customer_id",
     )
 
     id: Optional[int] = None
@@ -296,6 +300,8 @@ class Invoice:
     customer_tg_id: Optional[int] = None
     #: امتیاز مشتری به این خرید (۱ تا ۵؛ ۰ = بدون امتیاز)
     rating: int = 0
+    #: لینک به رکورد مشتری (customer_name برای نمایش/سازگاری می‌ماند)
+    customer_id: Optional[int] = None
     #: اقلام فاکتور — از جدول invoice_items پر می‌شود (در شیت ذخیره نمی‌شود).
     items: list = field(default_factory=list)
 
@@ -314,6 +320,7 @@ class Invoice:
             _s(self.customer_address), _s(self.issue_date), _s(self.note),
             _s(self.discount), _s(self.shipping), _s(self.created_at),
             _s(self.share_token), _s(self.customer_tg_id), _s(self.rating),
+            _s(self.customer_id),
         ]
 
     @classmethod
@@ -334,6 +341,7 @@ class Invoice:
             share_token=_pstr(d.get("share_token")),
             customer_tg_id=_pint(d.get("customer_tg_id")),
             rating=_pint(d.get("rating")) or 0,
+            customer_id=_pint(d.get("customer_id")),
         )
 
 
@@ -600,6 +608,40 @@ class BranchMember:
 
 
 @dataclass
+class Customer:
+    """یک طرف‌حساب (مشتری/تأمین‌کننده) که یک‌بار ذخیره و بارها استفاده می‌شود."""
+
+    TABLE = "customers"
+    COLUMNS = ("id", "user_id", "name", "phone", "address", "note", "created_at")
+
+    id: Optional[int] = None
+    user_id: int = 0
+    name: str = ""
+    phone: str = ""
+    address: str = ""
+    note: str = ""
+    created_at: Optional[dt.datetime] = None
+
+    def to_row(self) -> list:
+        return [
+            _s(self.id), _s(self.user_id), _s(self.name), _s(self.phone),
+            _s(self.address), _s(self.note), _s(self.created_at),
+        ]
+
+    @classmethod
+    def from_row(cls, d: dict) -> "Customer":
+        return cls(
+            id=_pint(d.get("id")),
+            user_id=_pint(d.get("user_id")) or 0,
+            name=_pstr(d.get("name")),
+            phone=_pstr(d.get("phone")),
+            address=_pstr(d.get("address")),
+            note=_pstr(d.get("note")),
+            created_at=_pdt(d.get("created_at")),
+        )
+
+
+@dataclass
 class Sequence:
     """شمارنده‌ی شناسه‌ی هر جدول (در اسپردشیت مرکزی).
 
@@ -633,7 +675,9 @@ class Sequence:
 CENTRAL_MODELS = (User, Subscription, Payment, Rate, Branch, BranchMember, Sequence)
 
 #: جدول‌های اسپردشیتِ **اختصاصیِ هر کاربر** — دفترِ واقعیِ کسب‌وکار.
-USER_MODELS = (Transaction, LedgerEntry, Invoice, InvoiceItem, Product, GroupEvent)
+USER_MODELS = (
+    Transaction, LedgerEntry, Invoice, InvoiceItem, Product, GroupEvent, Customer,
+)
 
 #: همه‌ی مدل‌ها (برای سازگاری و ابزارهای عمومی).
 ALL_MODELS = CENTRAL_MODELS + USER_MODELS
@@ -650,4 +694,5 @@ OWNER_FIELD = {
     "invoices": "user_id",
     "products": "user_id",
     "group_events": "chat_id",
+    "customers": "user_id",
 }

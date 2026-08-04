@@ -7,6 +7,7 @@ from typing import Optional
 from ..core import jalali, money
 from ..db.models import Direction, Instrument, LedgerEntry
 from ..db.store import Store
+from . import customers
 from .transactions import get_or_create_user
 
 
@@ -25,12 +26,23 @@ async def add_entry(
     description: str = "",
     instrument: str = Instrument.CASH,
     cheque_no: str = "",
+    customer_id: Optional[int] = None,
 ) -> LedgerEntry:
     await get_or_create_user(store, user_id)
+
+    # به رکورد مشتری لینک شود تا صورتحسابِ یک نفر کامل درآید.
+    if customer_id is None:
+        customer = await customers.find_or_create_customer(
+            store, user_id, party_name
+        )
+        if customer is not None:
+            customer_id = customer.id
+            party_name = customer.name
+
     entry = LedgerEntry(
         user_id=user_id, direction=direction, party_name=party_name,
         amount=int(amount), due_date=due_date, description=description,
-        instrument=instrument, cheque_no=cheque_no,
+        instrument=instrument, cheque_no=cheque_no, customer_id=customer_id,
     )
     await store.add("ledger_entries", entry)
     return entry
@@ -138,7 +150,22 @@ def _norm_party(name: str) -> str:
 
 
 def entries_for_party(store: Store, user_id: int, party_name: str) -> list[LedgerEntry]:
-    """ردیف‌های بازِ یک طرف‌حساب (تطبیق نامِ نرمال‌شده و شاملِ زیررشته)."""
+    """ردیف‌های بازِ یک طرف‌حساب.
+
+    اگر رکورد مشتری وجود داشته باشد، بر اساس ``customer_id`` (دقیق) جمع می‌شود؛
+    وگرنه به تطبیقِ نامِ نرمال‌شده برمی‌گردد تا داده‌های قدیمی هم دیده شوند.
+    """
+    customer = customers.find_customer(store, user_id, party_name)
+    if customer is not None:
+        by_id = store.list(
+            "ledger_entries",
+            lambda e: e.user_id == user_id
+            and not e.is_settled
+            and e.customer_id == customer.id,
+        )
+        if by_id:
+            return sorted(by_id, key=_due_key)
+
     target = _norm_party(party_name)
     if not target:
         return []
@@ -211,7 +238,12 @@ def party_statement_data(
     منبعِ مشترکِ هم متنِ صورتحساب و هم کارتِ تصویری آن است.
     """
     entries = entries_for_party(store, user_id, party_name)
-    if not entries:
+    customer = customers.find_customer(store, user_id, party_name)
+    # فاکتورهای همین مشتری (فقط وقتی رکورد مشتری داریم — تطبیق دقیق)
+    invoices = []
+    if customer is not None:
+        invoices = customers.customer_totals(store, user_id, customer.id)["invoices"]
+    if not entries and not invoices:
         return None
 
     receivable = sum(
@@ -228,13 +260,20 @@ def party_statement_data(
         for e in entries
     ]
     return {
-        "party": party_name,
+        "party": customer.name if customer is not None else party_name,
         "business_name": getattr(business, "business_name", None) if business else None,
         "date": jalali.now(),
         "entries": rows,
         "receivable": receivable,
         "payable": payable,
         "net": receivable - payable,  # مثبت = او به ما بدهکار است
+        # فاکتورها جداگانه گزارش می‌شوند و در «مانده» جمع نمی‌شوند تا اگر
+        # صاحب‌کار بابت همان فاکتور یک طلب هم ثبت کرده باشد، دوبار حساب نشود.
+        "invoices": [
+            {"number": i.number, "date": i.issue_date, "total": int(i.total)}
+            for i in invoices
+        ],
+        "invoiced": sum(int(i.total) for i in invoices),
     }
 
 
@@ -259,6 +298,21 @@ def build_party_statement(
         lines.append(
             f"• {tag}{row['label']} شما: {money.format_amount(row['amount'])}{due}"
         )
+
+    invoices = data.get("invoices") or []
+    if invoices:
+        if data["entries"]:
+            lines.append("")
+        lines.append("🧾 <b>فاکتورهای این مشتری:</b>")
+        for inv in invoices[-5:]:
+            when = f" — {jalali.format_date(inv['date'])}" if inv["date"] else ""
+            lines.append(
+                f"• شماره {inv['number']}{when}: {money.format_amount(inv['total'])}"
+            )
+        lines.append(
+            f"جمع فاکتورها: {money.format_amount(data['invoiced'])}"
+        )
+
     lines.append("")
     net = data["net"]
     if net > 0:
