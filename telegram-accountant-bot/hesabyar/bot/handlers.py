@@ -190,6 +190,16 @@ def _tx_summary(tx) -> str:
     return f"{_kind_label(tx.kind)} {money.format_amount(tx.amount)} ({tx.category})"
 
 
+def _tx_confirmation(tx) -> str:
+    """پیامِ تأییدِ یک تراکنشِ ثبت‌شده — برای ثبتِ تازه و برای تکرار، یکسان."""
+    return (
+        f"{_kind_icon(tx.kind)} {_kind_label(tx.kind)} ثبت شد\n"
+        f"مبلغ: {money.format_amount(tx.amount)}\n"
+        f"دسته: {tx.category}\n"
+        f"تاریخ: {jalali.format_date(tx.occurred_at)}"
+    )
+
+
 async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """دستور /undo — حذف آخرین تراکنش ثبت‌شده."""
     uid = update.effective_user.id
@@ -210,16 +220,59 @@ async def on_undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """دکمه‌ی «لغو این ثبت» زیر پیام تأیید تراکنش."""
     query = update.callback_query
     await query.answer()
-    uid = update.effective_user.id
     try:
         tx_id = int(query.data.split(":")[2])
     except (IndexError, ValueError):
         return
     with _session(context) as session:
+        # کارمندِ شعبه در دفترِ صاحب کسب‌وکار ثبت کرده؛ آنجا هم دنبالش بگرد.
+        uid, _ = branch_service.routing_for(session, update.effective_user.id)
         tx = await tx_service.delete_transaction(session, uid, tx_id)
         summary = _tx_summary(tx) if tx else None
     text = texts.UNDO_DONE.format(summary=summary) if summary else texts.UNDO_NONE
     await _safe_edit(query, text)
+
+
+async def on_tx_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌ی «🔁 تکرار همین ثبت» — همان مبلغ و دسته، با تاریخِ امروز."""
+    query = update.callback_query
+    try:
+        tx_id = int(query.data.split(":")[2])
+    except (IndexError, ValueError):
+        return await query.answer()
+    actor = update.effective_user.id
+
+    with _session(context) as session:
+        uid, branch_id = branch_service.routing_for(session, actor)
+        original = tx_service.get_transaction(session, uid, tx_id)
+        if original is None:
+            return await query.answer(texts.REPEAT_GONE, show_alert=True)
+        await sub_service.get_or_create_subscription(session, uid)
+        if not sub_service.is_active(session, uid):
+            session.commit()
+            await query.answer()
+            return await query.message.reply_text(
+                _paywall_text(session, uid),
+                reply_markup=keyboards.subscription_plans(),
+            )
+        copy = await tx_service.add_transaction(
+            session, uid,
+            kind=original.kind,
+            amount=original.amount,
+            category=original.category,
+            description=original.description,
+            occurred_at=jalali.now(),          # تاریخِ امروز، نه تاریخِ اصل
+            branch_id=branch_id or original.branch_id,
+            logged_by=actor if (branch_id or original.branch_id) else None,
+        )
+        session.commit()
+        new_id, body = copy.id, _tx_confirmation(copy)
+
+    await query.answer(texts.REPEAT_HEADER)
+    await query.message.reply_text(
+        f"{texts.REPEAT_HEADER}\n\n{body}",
+        reply_markup=keyboards.transaction_confirmed_actions(new_id),
+    )
 
 
 def _tx_line(tx) -> str:
@@ -632,15 +685,12 @@ async def _log_transaction(update, context, text: str) -> None:
         tx_id = tx.id
         # آیا این اولین تراکنشِ کاربر است؟ (برای پیام تشویقیِ آن‌بوردینگ)
         is_first = len(session.list("transactions", lambda t: t.user_id == uid)) == 1
-    msg = (
-        f"{_kind_icon(parsed.kind)} {_kind_label(parsed.kind)} ثبت شد\n"
-        f"مبلغ: {money.format_amount(parsed.amount)}\n"
-        f"دسته: {category}\n"
-        f"تاریخ: {jalali.format_date(parsed.occurred_at)}"
-    )
+    msg = _tx_confirmation(tx)
     if is_first:
         msg += texts.FIRST_TX_CELEBRATION
-    await update.message.reply_text(msg, reply_markup=keyboards.undo_transaction(tx_id))
+    await update.message.reply_text(
+        msg, reply_markup=keyboards.transaction_confirmed_actions(tx_id)
+    )
 
 
 # --- گزارش (callback) ---------------------------------------------------------
@@ -2516,6 +2566,7 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_payment_review, pattern=r"^pay:"))
     application.add_handler(CallbackQueryHandler(on_zarinpal_verify, pattern=r"^zpv:"))
     application.add_handler(CallbackQueryHandler(on_undo, pattern=r"^tx:undo:"))
+    application.add_handler(CallbackQueryHandler(on_tx_repeat, pattern=r"^tx:repeat:"))
     application.add_handler(
         CallbackQueryHandler(on_tx_action, pattern=r"^tx:(eamt|ecat|setcat|del):")
     )

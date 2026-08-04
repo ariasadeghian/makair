@@ -149,11 +149,20 @@ def payment_review(payment_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def undo_transaction(transaction_id: int) -> InlineKeyboardMarkup:
-    """دکمه‌ی لغو همین ثبت، زیر پیام تأیید تراکنش."""
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(texts.BTN_UNDO_TX, callback_data=f"tx:undo:{transaction_id}")]]
-    )
+def transaction_confirmed_actions(transaction_id: int) -> InlineKeyboardMarkup:
+    """کارهای زیرِ پیامِ تأییدِ هر تراکنش: لغو، و ثبتِ دوباره‌ی همان چیز.
+
+    «تکرار» برای خرج‌های همیشگی است — کرایه‌ی روزانه‌ی پیک، خریدِ هرروزه‌ی
+    نان — که کاربر نباید هر بار از نو بنویسدشان.
+    """
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_UNDO_TX, callback_data=f"tx:undo:{transaction_id}"),
+        InlineKeyboardButton(texts.BTN_REPEAT_TX, callback_data=f"tx:repeat:{transaction_id}"),
+    ]])
+
+
+#: نام قدیمی — همان کیبورد را می‌دهد.
+undo_transaction = transaction_confirmed_actions
 
 
 def zarinpal_pay(pay_url: str, payment_id: int) -> InlineKeyboardMarkup:
