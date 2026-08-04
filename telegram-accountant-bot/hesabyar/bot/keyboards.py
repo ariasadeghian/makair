@@ -29,6 +29,32 @@ def _back_row() -> list:
     return [InlineKeyboardButton(texts.BTN_BACK_MAIN, callback_data="menu:main")]
 
 
+#: تنها ``callback_data``ی خروج از جریان‌های چندمرحله‌ای.
+CANCEL_DATA = "flow:cancel"
+
+
+def _cancel_row() -> list:
+    return [InlineKeyboardButton(texts.BTN_FLOW_CANCEL, callback_data=CANCEL_DATA)]
+
+
+def with_cancel(markup: InlineKeyboardMarkup | None = None) -> InlineKeyboardMarkup:
+    """یک ردیفِ «❌ لغو عملیات» به انتهای کیبورد اضافه می‌کند.
+
+    بدون آرگومان، کیبوردِ تک‌دکمه‌ایِ لغو می‌سازد — برای مرحله‌هایی که کاربر
+    باید متن آزاد تایپ کند و کیبورد شیشه‌ای دیگری ندارند.
+    اگر ردیفِ لغو از قبل باشد، دوباره اضافه نمی‌شود.
+    """
+    rows = [list(row) for row in markup.inline_keyboard] if markup is not None else []
+    if rows and any(b.callback_data == CANCEL_DATA for b in rows[-1]):
+        return markup
+    return InlineKeyboardMarkup([*rows, _cancel_row()])
+
+
+def cancel_only() -> InlineKeyboardMarkup:
+    """کیبوردِ فقط-لغو، زیرِ پیام‌هایی که منتظر تایپِ کاربرند."""
+    return with_cancel()
+
+
 def report_menu() -> InlineKeyboardMarkup:
     """زیرمنوی گزارش و داشبورد."""
     return InlineKeyboardMarkup([
@@ -171,7 +197,7 @@ def invoice_builder(products, has_items: bool) -> InlineKeyboardMarkup:
     if has_items:
         controls.append(InlineKeyboardButton("↩️ حذف آخرین", callback_data="inv:pop"))
     rows.append(controls)
-    return InlineKeyboardMarkup(rows)
+    return with_cancel(InlineKeyboardMarkup(rows))
 
 
 def product_list(products) -> InlineKeyboardMarkup:
@@ -198,7 +224,7 @@ def category_picker(transaction_id: int, kind: str) -> InlineKeyboardMarkup:
             row = []
     if row:
         rows.append(row)
-    return InlineKeyboardMarkup(rows)
+    return with_cancel(InlineKeyboardMarkup(rows))
 
 
 def ledger_settle_list(entries) -> InlineKeyboardMarkup | None:
@@ -257,12 +283,15 @@ def branch_menu() -> InlineKeyboardMarkup:
 
 
 def industry_picker() -> InlineKeyboardMarkup:
-    """انتخابگر صنفِ کسب‌وکار (یک دکمه در هر ردیف تا متن‌ها جا شوند)."""
+    """انتخابگر صنفِ کسب‌وکار (یک دکمه در هر ردیف تا متن‌ها جا شوند).
+
+    ردیفِ آخر «لغو» است تا این سؤال در شروعِ کار قابلِ رد کردن باشد.
+    """
     rows = [
         [InlineKeyboardButton(ind.label, callback_data=f"ind:{ind.key}")]
         for ind in industries.all_industries()
     ]
-    return InlineKeyboardMarkup(rows)
+    return with_cancel(InlineKeyboardMarkup(rows))
 
 
 def report_periods() -> InlineKeyboardMarkup:

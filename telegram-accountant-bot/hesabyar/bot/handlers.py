@@ -115,12 +115,15 @@ def _paywall_text(store, uid: int) -> str:
     return "\n\n".join(parts)
 
 
+#: هر کلیدی که یک جریانِ چندمرحله‌ای در ``user_data`` می‌سازد. هر جریانِ تازه
+#: باید کلیدش را اینجا اضافه کند تا لغو، چیزی از خودش جا نگذارد.
+_FLOW_KEYS = ("flow", "ledger", "invoice", "edit_tx", "product_tmp", "payment")
+
+
 def _clear_flow(context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data.pop("flow", None)
-    context.user_data.pop("ledger", None)
-    context.user_data.pop("invoice", None)
-    context.user_data.pop("edit_tx", None)
-    context.user_data.pop("product_tmp", None)
+    """پاک‌کردنِ کاملِ حالتِ جریانِ نیمه‌کاره (هیچ داده‌ای ذخیره نمی‌شود)."""
+    for key in _FLOW_KEYS:
+        context.user_data.pop(key, None)
 
 
 # --- دستورها -----------------------------------------------------------------
@@ -148,7 +151,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(texts.WELCOME_BACK, reply_markup=keyboards.main_menu())
     else:
         context.user_data["flow"] = "onboarding"
-        await update.message.reply_text(texts.WELCOME)
+        await update.message.reply_text(texts.WELCOME, reply_markup=keyboards.cancel_only())
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -160,6 +163,23 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _clear_flow(context)
     await update.message.reply_text(texts.CANCELLED, reply_markup=keyboards.main_menu())
+
+
+async def on_flow_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌ی «❌ لغو عملیات» — خروج از هر جریانِ چندمرحله‌ای.
+
+    همان کاری را می‌کند که ``/cancel`` می‌کرد: حالت را کامل پاک می‌کند،
+    کیبورد شیشه‌ایِ نیمه‌کاره را برمی‌دارد تا دوباره قابلِ لمس نباشد، و
+    منوی اصلی را برمی‌گرداند.
+    """
+    query = update.callback_query
+    await query.answer(texts.CANCELLED)
+    _clear_flow(context)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(texts.CANCELLED, reply_markup=keyboards.main_menu())
 
 
 def _tx_summary(tx) -> str:
@@ -228,7 +248,9 @@ async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _handle_edit_amount(update, context, text: str) -> None:
     amount = money.parse_amount(text)
     if amount is None:
-        return await update.message.reply_text(texts.EDIT_ASK_AMOUNT)
+        return await update.message.reply_text(
+            texts.EDIT_ASK_AMOUNT, reply_markup=keyboards.cancel_only()
+        )
     tx_id = context.user_data.get("edit_tx")
     uid = update.effective_user.id
     updated = None
@@ -261,7 +283,9 @@ async def on_tx_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.answer()
         context.user_data["flow"] = "edit_amount"
         context.user_data["edit_tx"] = tx_id
-        return await query.message.reply_text(texts.EDIT_ASK_AMOUNT)
+        return await query.message.reply_text(
+            texts.EDIT_ASK_AMOUNT, reply_markup=keyboards.cancel_only()
+        )
 
     if action == "del":
         await query.answer()
@@ -488,7 +512,9 @@ async def _route_text(
 async def _handle_onboarding(update, context, text: str) -> None:
     name = text.strip()
     if not name:
-        return await update.message.reply_text(texts.WELCOME)
+        return await update.message.reply_text(
+            texts.WELCOME, reply_markup=keyboards.cancel_only()
+        )
     uid = update.effective_user.id
     with _session(context) as session:
         user = await tx_service.get_or_create_user(session, uid)
@@ -652,7 +678,9 @@ async def on_ledger_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if action == "statement":
         context.user_data["flow"] = "statement_party"
-        return await query.edit_message_text(texts.STATEMENT_ASK_NAME)
+        return await query.edit_message_text(
+            texts.STATEMENT_ASK_NAME, reply_markup=keyboards.cancel_only()
+        )
 
     if action == "add":
         direction = parts[2]
@@ -663,7 +691,7 @@ async def on_ledger_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if direction == Direction.RECEIVABLE
             else texts.LEDGER_ASK_PARTY_PAYABLE
         )
-        await query.edit_message_text(prompt)
+        await query.edit_message_text(prompt, reply_markup=keyboards.cancel_only())
 
 
 _CHEQUE_NO_RE = re.compile(r"[\d۰-۹]{6,}")
@@ -692,15 +720,21 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
         data["instrument"] = instrument
         data["cheque_no"] = cheque_no
         context.user_data["flow"] = "ledger_amount"
-        return await update.message.reply_text(texts.LEDGER_ASK_AMOUNT)
+        return await update.message.reply_text(
+            texts.LEDGER_ASK_AMOUNT, reply_markup=keyboards.cancel_only()
+        )
 
     if flow == "ledger_amount":
         amount = money.parse_amount(text)
         if amount is None:
-            return await update.message.reply_text(texts.LEDGER_ASK_AMOUNT)
+            return await update.message.reply_text(
+                texts.LEDGER_ASK_AMOUNT, reply_markup=keyboards.cancel_only()
+            )
         data["amount"] = amount
         context.user_data["flow"] = "ledger_due"
-        return await update.message.reply_text(texts.LEDGER_ASK_DUE)
+        return await update.message.reply_text(
+            texts.LEDGER_ASK_DUE, reply_markup=keyboards.cancel_only()
+        )
 
     if flow == "ledger_due":
         due_date = None
@@ -739,9 +773,12 @@ async def _handle_ledger_flow(update, context, text: str, flow: str) -> None:
 async def _handle_statement(update, context, text: str) -> None:
     """صورتحساب یک طرف‌حساب را به‌صورت کارتِ تصویری (و متن) می‌فرستد."""
     name = text.strip()
-    _clear_flow(context)
     if not name:
-        return await update.message.reply_text(texts.STATEMENT_ASK_NAME)
+        # هنوز منتظر نام هستیم ⇒ جریان را نمی‌بندیم، فقط دوباره می‌پرسیم.
+        return await update.message.reply_text(
+            texts.STATEMENT_ASK_NAME, reply_markup=keyboards.cancel_only()
+        )
+    _clear_flow(context)
     uid = update.effective_user.id
     chat_id = update.effective_chat.id
     if not await _require_feature(
@@ -909,14 +946,18 @@ async def _handle_invoice_flow(update, context, text: str, flow: str) -> None:
             products = {p.title: p for p in products_service.list_products(session, uid)}
         item = _parse_item(text, products)
         if item is None:
-            return await update.message.reply_text(texts.INVOICE_BAD_ITEM)
+            return await update.message.reply_text(
+                texts.INVOICE_BAD_ITEM, reply_markup=keyboards.cancel_only()
+            )
         inv.setdefault("items", []).append(item)
         return await _refresh_builder(context, uid)
 
     if flow == "inv_discount":
         inv["discount"] = money.parse_amount(text) or 0
         context.user_data["flow"] = "inv_shipping"
-        return await update.message.reply_text(texts.INVOICE_ASK_SHIPPING)
+        return await update.message.reply_text(
+            texts.INVOICE_ASK_SHIPPING, reply_markup=keyboards.cancel_only()
+        )
 
     if flow == "inv_shipping":
         inv["shipping"] = money.parse_amount(text) or 0
@@ -959,7 +1000,9 @@ async def on_invoice_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if action == "extra":
         context.user_data["flow"] = "inv_discount"
         await query.answer()
-        return await query.message.reply_text(texts.INVOICE_ASK_DISCOUNT)
+        return await query.message.reply_text(
+            texts.INVOICE_ASK_DISCOUNT, reply_markup=keyboards.cancel_only()
+        )
 
     if action == "done":
         await query.answer()
@@ -1156,11 +1199,15 @@ async def _handle_product_flow(update, context, text: str, flow: str) -> None:
     if flow == "prod_name":
         context.user_data["product_tmp"] = {"title": text[:200]}
         context.user_data["flow"] = "prod_price"
-        return await update.message.reply_text(texts.PRODUCT_ASK_PRICE)
+        return await update.message.reply_text(
+            texts.PRODUCT_ASK_PRICE, reply_markup=keyboards.cancel_only()
+        )
     if flow == "prod_price":
         price = money.parse_amount(text)
         if price is None:
-            return await update.message.reply_text(texts.PRODUCT_ASK_PRICE)
+            return await update.message.reply_text(
+                texts.PRODUCT_ASK_PRICE, reply_markup=keyboards.cancel_only()
+            )
         title = (context.user_data.get("product_tmp") or {}).get("title", "کالا")
         uid = update.effective_user.id
         with _session(context) as session:
@@ -1183,7 +1230,9 @@ async def on_product_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if action == "add":
         context.user_data["flow"] = "prod_name"
         await query.answer()
-        return await query.message.reply_text(texts.PRODUCT_ASK_NAME)
+        return await query.message.reply_text(
+            texts.PRODUCT_ASK_NAME, reply_markup=keyboards.cancel_only()
+        )
 
     if action == "del":
         try:
@@ -1248,6 +1297,7 @@ async def on_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             holder=settings.card_holder or "—",
         ),
         parse_mode="HTML",
+        reply_markup=keyboards.cancel_only(),
     )
 
 
@@ -2053,14 +2103,21 @@ async def on_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # اکشن‌هایی که ورودیِ متنی می‌خواهند ⇒ یک جریانِ کوتاه شروع می‌شود
     if action == "search":
         context.user_data["flow"] = "search_query"
-        return await query.message.reply_text(texts.SEARCH_ASK)
+        return await query.message.reply_text(
+            texts.SEARCH_ASK, reply_markup=keyboards.cancel_only()
+        )
     if action == "join":
         context.user_data["flow"] = "join_code"
-        return await query.message.reply_text(texts.JOIN_ASK_CODE, parse_mode="HTML")
+        return await query.message.reply_text(
+            texts.JOIN_ASK_CODE, parse_mode="HTML",
+            reply_markup=keyboards.cancel_only(),
+        )
     if action == "newinvoice":
         context.user_data["flow"] = "invoice_customer"
         context.user_data["invoice"] = {"items": [], "discount": 0, "shipping": 0}
-        return await query.message.reply_text(texts.INVOICE_ASK_CUSTOMER)
+        return await query.message.reply_text(
+            texts.INVOICE_ASK_CUSTOMER, reply_markup=keyboards.cancel_only()
+        )
     if action == "plans":
         return await _show_subscription(shim, context)
     if action == "rate":  # از منو فقط نمایش نرخ (ثبت با /rate عدد)
@@ -2186,7 +2243,9 @@ async def on_branch_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if action == "add":
         context.user_data["flow"] = "branch_name"
-        return await query.message.reply_text(texts.BRANCH_ASK_NAME)
+        return await query.message.reply_text(
+            texts.BRANCH_ASK_NAME, reply_markup=keyboards.cancel_only()
+        )
 
     if action == "report":
         start, end = jalali.day_bounds(jalali.now())
@@ -2334,6 +2393,10 @@ def register(application: Application) -> None:
     application.add_handler(CommandHandler("branches", branches_cmd))
     application.add_handler(CommandHandler("join", join_cmd))
     application.add_handler(CommandHandler("leave", leave_cmd))
+    # لغوِ جریان‌های چندمرحله‌ای — پیش از بقیه، چون از هر کیبوردی می‌آید
+    application.add_handler(
+        CallbackQueryHandler(on_flow_cancel, pattern=r"^flow:cancel$")
+    )
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
