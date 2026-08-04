@@ -579,11 +579,28 @@ async def industry_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def _not_understood(update, context, text: str) -> None:
+    """راهنمای کوتاه وقتی هیچ‌کدام از دو پارسر متن را نفهمید.
+
+    فقط از انتهای :func:`_route_text` می‌آید — یعنی کاربر وسطِ هیچ جریانی
+    نیست و روی هیچ دکمه‌ای هم نزده. نمونه‌ی نوشتاری را با زیرمنویِ همان کار
+    نشان می‌دهد تا کاربر گیر نکند.
+    """
+    invoice_attempt = invoice_nlp.looks_like_invoice(text)
+    await update.message.reply_text(
+        texts.UNKNOWN_INVOICE_INPUT if invoice_attempt else texts.UNKNOWN_INPUT,
+        reply_markup=(
+            keyboards.invoice_menu() if invoice_attempt
+            else keyboards.transactions_menu()
+        ),
+    )
+
+
 async def _log_transaction(update, context, text: str) -> None:
     settings = context.application.bot_data["settings"]
     parsed = await extract_service.extract_transaction(settings, text, base=jalali.now())
     if parsed is None:
-        return await update.message.reply_text(texts.UNKNOWN_INPUT)
+        return await _not_understood(update, context, text)
     actor = update.effective_user.id
     with _session(context) as session:
         # اگر کارمندِ شعبه است، ثبت در دفترِ صاحب کسب‌وکار با برچسبِ شعبه
