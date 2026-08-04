@@ -219,6 +219,31 @@ def _run_currency(tokens: list[str], start: int, end: int, full_text: str) -> st
     return "toman"
 
 
+# --- API برای پارسرهای بالادستی -----------------------------------------------
+#
+# :mod:`hesabyar.core.invoice_nlp` باید بداند هر عدد *کجای* جمله است (تا تعداد
+# را از قیمت جدا کند)، نه فقط مقدارش. این سه تابع همان منطقِ داخلی را بدون
+# دوباره‌نویسی در اختیارش می‌گذارند.
+
+#: واژه‌های واحد پول (تومان/ریال).
+CURRENCY_WORDS = _CURRENCY_WORDS
+
+
+def number_runs(tokens: list[str]) -> list:
+    """دنباله‌های عددیِ پیوسته: ``[(start, end, values), …]``."""
+    return _iter_number_runs(tokens)
+
+
+def eval_run(values: list) -> Optional[float]:
+    """ارزشِ یک دنباله‌ی عددی (با احتساب «هزار»/«میلیون»)."""
+    return _eval_run(values)
+
+
+def run_currency(tokens: list[str], start: int, end: int, full_text: str = "") -> str:
+    """واحد پولِ یک دنباله: ``"rial"`` یا ``"toman"``."""
+    return _run_currency(tokens, start, end, full_text or " ".join(tokens))
+
+
 def parse_amount(text: str) -> Optional[int]:
     """استخراج مبلغ (به تومان) از یک نوشته‌ی فارسی.
 

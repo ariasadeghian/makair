@@ -200,6 +200,19 @@ def invoice_builder(products, has_items: bool) -> InlineKeyboardMarkup:
     return with_cancel(InlineKeyboardMarkup(rows))
 
 
+def invoice_nlp_confirm() -> InlineKeyboardMarkup:
+    """تأییدِ فاکتوری که از روی یک جمله‌ی آزاد فهمیده شده.
+
+    «لغو» عمداً همان ``flow:cancel`` فاز ۴ است تا حالتِ نیمه‌کاره یک‌جا و به
+    یک شکل پاک شود.
+    """
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_INVNLP_CONFIRM, callback_data="invnlp:confirm")],
+        [InlineKeyboardButton(texts.BTN_INVNLP_EDIT, callback_data="invnlp:edit")],
+        [InlineKeyboardButton(texts.BTN_INVNLP_CANCEL, callback_data=CANCEL_DATA)],
+    ])
+
+
 def product_list(products) -> InlineKeyboardMarkup:
     """فهرست کالاها؛ هر کالا یک دکمه‌ی حذف، به‌علاوه‌ی افزودن."""
     rows: list = []

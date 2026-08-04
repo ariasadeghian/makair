@@ -24,7 +24,9 @@ from telegram.ext import (
 )
 
 from .. import plans
-from ..core import categories, group_nlp, industries, jalali, money, nlp
+from ..core import (
+    categories, group_nlp, industries, invoice_nlp, jalali, money, nlp,
+)
 from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
 from ..pdf.invoice_pdf import (
     render_invoice_image,
@@ -117,7 +119,9 @@ def _paywall_text(store, uid: int) -> str:
 
 #: هر کلیدی که یک جریانِ چندمرحله‌ای در ``user_data`` می‌سازد. هر جریانِ تازه
 #: باید کلیدش را اینجا اضافه کند تا لغو، چیزی از خودش جا نگذارد.
-_FLOW_KEYS = ("flow", "ledger", "invoice", "edit_tx", "product_tmp", "payment")
+_FLOW_KEYS = (
+    "flow", "ledger", "invoice", "edit_tx", "product_tmp", "payment", "invnlp",
+)
 
 
 def _clear_flow(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -504,6 +508,13 @@ async def _route_text(
     url = ingest_service.find_url(text)
     if url and money.parse_amount(text) is None:
         return await _ingest_from_url(update, context, url)
+
+    # «فاکتور برای علی، ۲ صندلی ۵۰۰ هزار» ⇒ پیش‌نویسِ فاکتور برای تأیید.
+    # اگر پارس نشد، بی‌سروصدا به ثبتِ تراکنش می‌افتد.
+    if invoice_nlp.looks_like_invoice(text):
+        parsed = invoice_nlp.parse_invoice_text(text)
+        if parsed is not None:
+            return await _offer_parsed_invoice(update, context, parsed)
 
     # در غیر این صورت: ثبت تراکنش از روی متن
     await _log_transaction(update, context, text)
@@ -1007,6 +1018,84 @@ async def on_invoice_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if action == "done":
         await query.answer()
         return await _finalize_invoice(update, context)
+
+
+# --- فاکتور از روی یک جمله‌ی آزاد ------------------------------------------------
+
+
+def _parsed_invoice_text(parsed) -> str:
+    """خلاصه‌ی چیزی که از جمله فهمیده شد، برای تأییدِ کاربر."""
+    lines = [
+        texts.INVNLP_HEADER,
+        texts.INVNLP_CUSTOMER.format(name=parsed.customer_name),
+        texts.INVNLP_ITEMS_HEADER,
+    ]
+    for item in parsed.items:
+        lines.append(texts.INVNLP_ITEM_LINE.format(
+            title=item.title,
+            qty=money.to_persian_digits(str(item.quantity)),
+            price=money.format_amount(item.unit_price),
+        ))
+    lines.append("")
+    lines.append(texts.INVNLP_TOTAL.format(total=money.format_amount(parsed.total)))
+    body = "\n".join(lines)
+    if parsed.confidence < 0.7:
+        body += texts.INVNLP_LOW_CONFIDENCE
+    return f"{body}\n\n{texts.INVNLP_ASK}"
+
+
+async def _offer_parsed_invoice(update, context, parsed) -> None:
+    """پیش‌نویس را نشان می‌دهد؛ تا تأیید نگیرد چیزی ثبت نمی‌شود."""
+    context.user_data["invnlp"] = {
+        "customer_name": parsed.customer_name,
+        "items": parsed.as_items(),
+        "discount": 0,
+        "shipping": 0,
+    }
+    await update.message.reply_text(
+        _parsed_invoice_text(parsed), parse_mode="HTML",
+        reply_markup=keyboards.invoice_nlp_confirm(),
+    )
+
+
+async def on_invoice_nlp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های پیش‌نویسِ فاکتور: «ثبت کن» و «ویرایش دستی»."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":", 1)[1]
+    draft = context.user_data.get("invnlp")
+    if not draft:
+        return await _safe_edit(query, texts.INVNLP_GONE)
+
+    if action == "confirm":
+        # همان مسیرِ همیشگیِ صدور — ساخت فاکتور دوباره نوشته نشده است.
+        context.user_data["invoice"] = dict(draft)
+        context.user_data.pop("invnlp", None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:  # noqa: BLE001 - نبودِ ویرایش، صدور را نمی‌شکند
+            pass
+        return await _finalize_invoice(_CallbackUpdate(update), context)
+
+    if action == "edit":
+        uid = update.effective_user.id
+        inv = dict(draft)
+        context.user_data["invoice"] = inv
+        context.user_data.pop("invnlp", None)
+        context.user_data["flow"] = "invoice_items"
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:  # noqa: BLE001
+            pass
+        await query.message.reply_text(texts.INVNLP_EDIT_INTRO)
+        with _session(context) as session:
+            products = products_service.list_products(session, uid)
+        sent = await query.message.reply_text(
+            _builder_text(inv), parse_mode="HTML",
+            reply_markup=keyboards.invoice_builder(products, bool(inv.get("items"))),
+        )
+        inv["msg_id"] = getattr(sent, "message_id", None)
+        inv["chat_id"] = getattr(sent, "chat_id", update.effective_chat.id)
 
 
 async def _finalize_invoice(update, context) -> None:
@@ -2414,6 +2503,7 @@ def register(application: Application) -> None:
         CallbackQueryHandler(on_tx_action, pattern=r"^tx:(eamt|ecat|setcat|del):")
     )
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
+    application.add_handler(CallbackQueryHandler(on_invoice_nlp, pattern=r"^invnlp:"))
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))

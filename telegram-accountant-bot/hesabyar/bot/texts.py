@@ -175,6 +175,24 @@ INVOICE_BAD_ITEM = (
     "متوجه نشدم. یک کالا را از دکمه‌ها بزنید یا این‌طور بنویسید:\n"
     "«نام تعداد قیمت» — مثلاً «مانتو ۲ ۱۸۵۰۰۰۰»"
 )
+# فاکتور از روی یک جمله‌ی آزاد — همیشه قبل از ثبت تأیید گرفته می‌شود
+INVNLP_HEADER = "فهمیدم: 👇"
+INVNLP_CUSTOMER = "مشتری: <b>{name}</b>"
+INVNLP_ITEMS_HEADER = "اقلام:"
+INVNLP_ITEM_LINE = "• {title} × {qty} — هر واحد {price}"
+INVNLP_TOTAL = "جمع کل: <b>{total}</b>"
+INVNLP_ASK = "ثبت کنم؟"
+INVNLP_LOW_CONFIDENCE = (
+    "\n<i>مطمئن نیستم درست خوانده باشم — اگر چیزی غلط است «✏️ ویرایش دستی» را بزنید.</i>"
+)
+INVNLP_GONE = "این پیش‌نویس منقضی شده؛ دوباره بنویسید یا «➕ فاکتور جدید» را بزنید."
+INVNLP_EDIT_INTRO = (
+    "باشد — دستی ادامه می‌دهیم. اقلام را می‌توانید کم/زیاد کنید و بعد «✅ صدور فاکتور» را بزنید."
+)
+BTN_INVNLP_CONFIRM = "✅ ثبت کن"
+BTN_INVNLP_EDIT = "✏️ ویرایش دستی"
+BTN_INVNLP_CANCEL = "❌ لغو"
+
 INVOICE_ASK_DISCOUNT = "مبلغ تخفیف را بنویسید (یا «۰»):"
 INVOICE_ASK_SHIPPING = "هزینه‌ی ارسال را بنویسید (یا «۰»):"
 INVOICE_EXTRA_DONE = "اعمال شد ✅"
