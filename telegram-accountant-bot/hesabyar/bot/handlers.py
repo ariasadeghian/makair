@@ -539,7 +539,7 @@ async def _route_text(
         return await _handle_business_name(update, context, text)
     if flow in ("invoice_customer", "invoice_items", "inv_discount", "inv_shipping"):
         return await _handle_invoice_flow(update, context, text, flow)
-    if flow in ("prod_name", "prod_price"):
+    if flow in ("prod_name", "prod_category", "prod_newcat", "prod_price"):
         return await _handle_product_flow(update, context, text, flow)
     if flow == "payment_reference":
         return await _handle_payment_flow(update, context, reference=text)
@@ -678,6 +678,7 @@ async def on_industry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         user = await tx_service.get_or_create_user(session, uid)
         user.business_type = key
         await session.update("users", user)
+    await _refresh_summary(context, uid)
     await _safe_edit(query, texts.INDUSTRY_CHANGED.format(
         label=industries.label_for(key)
     ))
@@ -714,6 +715,7 @@ async def _handle_business_name(update, context, text: str) -> None:
         texts.BIZNAME_SAVED.format(name=name[:200]),
         reply_markup=keyboards.main_menu(),
     )
+    await _refresh_summary(context, uid)
 
 
 async def industry_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1545,29 +1547,97 @@ async def products_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def _ask_product_category(update, context, uid: int) -> None:
+    """مرحله‌ی اختیاریِ دسته‌بندی، بین نام و قیمت."""
+    with _session(context) as session:
+        known = products_service.used_categories(session, uid)
+    context.user_data.setdefault("product_tmp", {})["cats"] = known
+    context.user_data["flow"] = "prod_category"
+    await update.message.reply_text(
+        texts.PRODUCT_ASK_CATEGORY,
+        reply_markup=keyboards.product_category_picker(known),
+    )
+
+
+async def _ask_product_price(update, context) -> None:
+    context.user_data["flow"] = "prod_price"
+    await update.message.reply_text(
+        texts.PRODUCT_ASK_PRICE, reply_markup=keyboards.cancel_only()
+    )
+
+
 async def _handle_product_flow(update, context, text: str, flow: str) -> None:
+    data = context.user_data.setdefault("product_tmp", {})
+
     if flow == "prod_name":
-        context.user_data["product_tmp"] = {"title": text[:200]}
-        context.user_data["flow"] = "prod_price"
-        return await update.message.reply_text(
-            texts.PRODUCT_ASK_PRICE, reply_markup=keyboards.cancel_only()
-        )
+        data["title"] = text[:200]
+        return await _ask_product_category(update, context, update.effective_user.id)
+
+    if flow in ("prod_category", "prod_newcat"):
+        # کاربر به‌جای دکمه، نامِ دسته را تایپ کرده
+        data["category"] = text.strip()[:100]
+        return await _ask_product_price(update, context)
+
     if flow == "prod_price":
         price = money.parse_amount(text)
         if price is None:
             return await update.message.reply_text(
                 texts.PRODUCT_ASK_PRICE, reply_markup=keyboards.cancel_only()
             )
-        title = (context.user_data.get("product_tmp") or {}).get("title", "کالا")
+        title = data.get("title", "کالا")
+        category = data.get("category", "")
         uid = update.effective_user.id
         with _session(context) as session:
-            await products_service.add_product(session, uid, title, price)
+            await products_service.add_product(session, uid, title, price, category)
             products = products_service.list_products(session, uid)
         _clear_flow(context)
-        await update.message.reply_text(
-            texts.PRODUCT_SAVED.format(title=title, price=money.format_amount(price)),
-            reply_markup=keyboards.product_list(products),
+        saved = texts.PRODUCT_SAVED.format(
+            title=title, price=money.format_amount(price)
         )
+        if category:
+            saved += f"\n🏷 دسته: {category}"
+        await update.message.reply_text(
+            saved, reply_markup=keyboards.product_list(products)
+        )
+        await _refresh_summary(context, uid)
+
+
+async def _refresh_summary(context: ContextTypes.DEFAULT_TYPE, uid: int) -> None:
+    """تبِ نمایشیِ «خلاصه» را به‌روز می‌کند؛ شکستش کاربر را درگیر نمی‌کند."""
+    try:
+        await _store(context).refresh_summary(uid)
+    except Exception:  # noqa: BLE001 - تبِ نمایشی است، نه داده
+        pass
+
+
+async def on_product_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های مرحله‌ی دسته‌بندیِ کالا."""
+    query = update.callback_query
+    await query.answer()
+    if context.user_data.get("flow") != "prod_category":
+        return
+    data = context.user_data.setdefault("product_tmp", {})
+    action = query.data.split(":")[1]
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+    shim = _CallbackUpdate(update)
+
+    if action == "new":
+        context.user_data["flow"] = "prod_newcat"
+        return await query.message.reply_text(
+            texts.PRODUCT_ASK_NEW_CATEGORY, reply_markup=keyboards.cancel_only()
+        )
+    if action == "pick":
+        known = data.get("cats") or []
+        try:
+            data["category"] = known[int(query.data.split(":")[2])]
+        except (IndexError, ValueError):
+            data["category"] = ""
+    else:  # skip
+        data["category"] = ""
+    await _ask_product_price(shim, context)
 
 
 async def on_product_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1593,6 +1663,7 @@ async def on_product_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await products_service.delete_product(session, uid, pid)
             products = products_service.list_products(session, uid)
         await query.answer("حذف شد 🗑")
+        await _refresh_summary(context, uid)
         try:
             await query.edit_message_reply_markup(
                 reply_markup=keyboards.product_list(products)
@@ -1753,6 +1824,8 @@ async def on_payment_review(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return await _safe_edit(query, texts.ADMIN_PAYMENT_GONE)
 
     result = "تأیید شد ✅" if approved else "رد شد ❌"
+    if approved and target_uid is not None:
+        await _refresh_summary(context, target_uid)  # پلن در تبِ خلاصه عوض شد
     await _safe_edit(query, texts.ADMIN_PAYMENT_DONE.format(pid=pid, result=result))
 
     if target_uid is not None:
@@ -1870,6 +1943,7 @@ async def on_zarinpal_verify(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await session.update("payments", approved)
         status_text = sub_service.status_text(session, uid)
         await session.flush()  # پرداخت آنلاین را فوری روی شیت بنویس
+    await _refresh_summary(context, uid)  # پلن در تبِ خلاصه عوض شد
     await _safe_edit(
         query, texts.PAYMENT_VERIFY_OK.format(ref=ref_id, status=status_text)
     )
@@ -2789,6 +2863,7 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_invoice_nlp, pattern=r"^invnlp:"))
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
+    application.add_handler(CallbackQueryHandler(on_product_category, pattern=r"^pcat:"))
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
     application.add_handler(CallbackQueryHandler(on_industry, pattern=r"^ind:"))
     application.add_handler(

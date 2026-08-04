@@ -431,18 +431,20 @@ class Payment:
 @dataclass
 class Product:
     TABLE = "products"
-    COLUMNS = ("id", "user_id", "title", "unit_price", "created_at")
+    COLUMNS = ("id", "user_id", "title", "unit_price", "created_at", "category")
 
     id: Optional[int] = None
     user_id: int = 0
     title: str = ""
     unit_price: int = 0
     created_at: Optional[dt.datetime] = None
+    #: دسته‌بندیِ دلخواهِ کاربر (خالی = دسته‌بندی‌نشده).
+    category: str = ""
 
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.user_id), _s(self.title),
-            _s(self.unit_price), _s(self.created_at),
+            _s(self.unit_price), _s(self.created_at), _s(self.category),
         ]
 
     @classmethod
@@ -453,6 +455,7 @@ class Product:
             title=_pstr(d.get("title")),
             unit_price=_pint(d.get("unit_price")) or 0,
             created_at=_pdt(d.get("created_at")),
+            category=_pstr(d.get("category")),
         )
 
 

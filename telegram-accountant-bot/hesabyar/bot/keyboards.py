@@ -212,6 +212,23 @@ def invoice_builder(products, has_items: bool) -> InlineKeyboardMarkup:
     return with_cancel(InlineKeyboardMarkup(rows))
 
 
+def product_category_picker(categories) -> InlineKeyboardMarkup:
+    """دسته‌های قبلیِ همین کاربر + «دسته‌ی جدید» + «رد کردن».
+
+    اندیس در ``callback_data`` می‌آید نه خودِ نام — نامِ فارسی به‌راحتی از
+    محدودیتِ ۶۴ بایتیِ تلگرام رد می‌شود.
+    """
+    rows = [
+        [InlineKeyboardButton(name[:40], callback_data=f"pcat:pick:{index}")]
+        for index, name in enumerate(categories)
+    ]
+    rows.append([
+        InlineKeyboardButton(texts.BTN_CATEGORY_NEW, callback_data="pcat:new"),
+        InlineKeyboardButton(texts.BTN_CATEGORY_SKIP, callback_data="pcat:skip"),
+    ])
+    return with_cancel(InlineKeyboardMarkup(rows))
+
+
 def daily_summary_actions() -> InlineKeyboardMarkup:
     """زیرِ خلاصه‌ی آخر روز: راهِ یک‌لمسی به گزارشِ کامل."""
     return InlineKeyboardMarkup([

@@ -78,6 +78,12 @@ class FakeSpreadsheet:
     def batch_update(self, body: dict):
         self.batch_updates.append(body)
 
+    def fetch_sheet_metadata(self, params=None):
+        return {"sheets": [
+            {"properties": {"sheetId": ws.id}, "conditionalFormats": []}
+            for ws in self._ws.values()
+        ]}
+
 
 class FakeClient:
     """کلاینت ساختگیِ gspread: ساخت و بازکردنِ اسپردشیت‌های اختصاصیِ کاربران."""

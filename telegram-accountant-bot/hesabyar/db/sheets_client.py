@@ -9,6 +9,7 @@ import functools
 import json
 import logging
 import time
+import zlib
 from typing import Callable, Optional, Sequence
 
 import gspread
@@ -198,6 +199,128 @@ def ensure_worksheets(spreadsheet, models: Optional[Sequence] = None) -> None:
             style_worksheet(ws, header)
         elif not existing[model.TABLE].get_all_values():
             existing[model.TABLE].append_row(header)
+
+
+# --- تبِ «خلاصه» و رنگِ دسته‌ها ---------------------------------------------------
+#
+# تبِ خلاصه فقط برای چشمِ کاربر است؛ بات هرگز از آن نمی‌خواند. ``Store`` تب‌ها را
+# با نامِ مدل‌ها باز می‌کند (``USER_MODELS``)، پس این تب خودبه‌خود نادیده گرفته
+# می‌شود. محتوایش هم همیشه از روی تب‌های اصلی بازتولید می‌شود — منبعِ حقیقت
+# همان‌جاست، نه اینجا.
+
+#: نامِ تبِ نمایشی. عمداً مدلی برایش وجود ندارد.
+SUMMARY_SHEET_TITLE = "📋 خلاصه"
+
+#: رنگ‌های چرخشیِ دسته‌های کالا (ملایم، تا متنِ مشکی خوانا بماند).
+CATEGORY_COLORS = (
+    {"red": 0.85, "green": 0.92, "blue": 0.83},
+    {"red": 0.85, "green": 0.89, "blue": 0.96},
+    {"red": 0.99, "green": 0.90, "blue": 0.80},
+    {"red": 0.93, "green": 0.86, "blue": 0.95},
+    {"red": 1.00, "green": 0.95, "blue": 0.80},
+    {"red": 0.84, "green": 0.94, "blue": 0.94},
+)
+
+
+def color_for_category(name: str) -> dict:
+    """رنگِ ثابتِ یک دسته — همیشه همان رنگ برای همان نام."""
+    index = zlib.crc32((name or "").encode("utf-8")) % len(CATEGORY_COLORS)
+    return CATEGORY_COLORS[index]
+
+
+def _summary_rows(user, products, subscription) -> list[list]:
+    """چیدمانِ عمودیِ تبِ خلاصه."""
+    rows: list[list] = [
+        ["👤 مشخصات کسب‌وکار", ""],
+        ["نام کسب‌وکار", getattr(user, "business_name", "") or "—"],
+        ["صنف", getattr(user, "business_type", "") or "—"],
+        ["پلن اشتراک", subscription or "—"],
+        ["", ""],
+        ["📦 کالاها بر اساس دسته", ""],
+    ]
+    if not products:
+        rows.append(["هنوز کالایی ثبت نشده", ""])
+        return rows
+    for category, items in products.items():
+        rows.append([f"-- {category or 'بدون دسته'} --", ""])
+        for item in items:
+            rows.append([item.title, item.unit_price])
+    return rows
+
+
+def rebuild_summary_sheet(spreadsheet, user, products, subscription: str = "") -> None:
+    """تبِ «📋 خلاصه» را از نو می‌سازد.
+
+    ``products`` نگاشتِ «دسته → فهرست کالا» است (خروجیِ
+    ``services.products.by_category``). این تب هر بار کامل بازنویسی می‌شود؛
+    چون هیچ‌کس از آن نمی‌خواند، پاک‌شدن و دوباره‌نوشتنش بی‌خطر است.
+    """
+    rows = _summary_rows(user, products or {}, subscription)
+    existing = {ws.title: ws for ws in spreadsheet.worksheets()}
+    ws = existing.get(SUMMARY_SHEET_TITLE)
+    if ws is None:
+        ws = spreadsheet.add_worksheet(
+            title=SUMMARY_SHEET_TITLE, rows=max(len(rows) + 20, 50), cols=2
+        )
+    ws.clear()
+    ws.update(rows, value_input_option="RAW")
+    _safely("هدرِ خلاصه", lambda: ws.format("A1:B1", HEADER_FORMAT))
+    _safely("پهنای خلاصه", lambda: _widen_columns(ws, [0]))
+
+
+def apply_category_colors(spreadsheet, ws, categories: Sequence[str]) -> None:
+    """رنگِ پس‌زمینه‌ی هر ردیفِ ``products`` بر اساس دسته‌اش.
+
+    قاعده‌ی شرطی روی خودِ تبِ اصلی می‌نشیند، پس جدول دست‌نخورده و
+    قابل‌خواندن‌توسطِ بات می‌ماند و نیازی به ردیفِ جداکننده نیست.
+    """
+    column = _col_letter(_category_column_index())
+    requests = _delete_rule_requests(spreadsheet, ws)
+    for order, name in enumerate(dict.fromkeys(c for c in categories if c)):
+        requests.append({
+            "addConditionalFormatRule": {
+                "index": order,
+                "rule": {
+                    "ranges": [{"sheetId": ws.id, "startRowIndex": 1}],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{
+                                "userEnteredValue": f'=${column}2="{name}"'
+                            }],
+                        },
+                        "format": {"backgroundColor": color_for_category(name)},
+                    },
+                },
+            }
+        })
+    if requests:
+        _safely("رنگِ دسته‌ها", lambda: spreadsheet.batch_update({"requests": requests}))
+
+
+def _category_column_index() -> int:
+    from .models import Product
+    return list(Product.COLUMNS).index("category") + 1
+
+
+def _delete_rule_requests(spreadsheet, ws) -> list:
+    """حذفِ قاعده‌های قبلی (از آخر به اول تا اندیس‌ها جابه‌جا نشوند)."""
+    count = 0
+    try:
+        meta = spreadsheet.fetch_sheet_metadata(
+            params={"fields": "sheets(properties(sheetId),conditionalFormats)"}
+        )
+        for sheet in meta.get("sheets", []):
+            if sheet.get("properties", {}).get("sheetId") == ws.id:
+                count = len(sheet.get("conditionalFormats") or [])
+                break
+    except Exception as exc:  # noqa: BLE001 - بدونِ حذف هم کار می‌کند
+        logger.warning("خواندنِ قاعده‌های شرطی ناموفق: %s", exc)
+        return []
+    return [
+        {"deleteConditionalFormatRule": {"sheetId": ws.id, "index": index}}
+        for index in range(count - 1, -1, -1)
+    ]
 
 
 @with_retry

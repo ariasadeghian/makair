@@ -338,6 +338,14 @@ class TestEveryFlowIsCancellable:
         assert ctx.user_data["flow"] == "prod_name"
         assert CANCEL in _cb(query.message.markup)
         msg = await _type(ctx, "پیراهن")
+        assert ctx.user_data["flow"] == "prod_category"
+        assert CANCEL in _cb(msg.markup)
+        # «دسته‌ی جدید» ⇒ یک مرحله‌ی متنیِ دیگر، آن هم با دکمه‌ی لغو
+        cat = _Query("pcat:new")
+        await handlers.on_product_category(_update(query=cat), ctx)
+        assert ctx.user_data["flow"] == "prod_newcat"
+        assert CANCEL in _cb(cat.message.markup)
+        msg = await _type(ctx, "پوشاک")
         assert ctx.user_data["flow"] == "prod_price"
         assert CANCEL in _cb(msg.markup)
         await _press_cancel(ctx)
@@ -402,7 +410,7 @@ COVERED_FLOWS = {
     "ledger_party", "ledger_amount", "ledger_due", "statement_party",
     "branch_name", "business_name",
     "invoice_customer", "invoice_items", "inv_discount", "inv_shipping",
-    "prod_name", "prod_price",
+    "prod_name", "prod_category", "prod_newcat", "prod_price",
     "payment_reference", "edit_amount",
     "search_query", "join_code",
 }

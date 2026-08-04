@@ -165,6 +165,38 @@ class Store:
         self._user_ss[user_id] = spreadsheet
         return spreadsheet
 
+    async def refresh_summary(self, user_id: int) -> bool:
+        """تبِ نمایشیِ «📋 خلاصه» را از روی داده‌ی واقعی از نو می‌سازد.
+
+        هیچ‌جای بات از این تب نمی‌خواند؛ شکستش هم بی‌خطر است (فقط لاگ) چون
+        منبعِ حقیقت همان تب‌های اصلی است.
+        """
+        from ..services import products as products_service
+        from ..services import subscription as sub_service
+
+        user_id = int(user_id)
+        user = self.data["users"].get(user_id)
+        if user is None:
+            return False
+        spreadsheet = await self._open_user_spreadsheet(user_id)
+        if spreadsheet is None:
+            return False
+        grouped = products_service.by_category(self, user_id)
+        plan = sub_service.tier_label_for(self, user_id)
+        try:
+            await asyncio.to_thread(
+                sheets.rebuild_summary_sheet, spreadsheet, user, grouped, plan
+            )
+            ws = self._user_ws.get(user_id, {}).get("products")
+            if ws is not None:
+                await asyncio.to_thread(
+                    sheets.apply_category_colors, spreadsheet, ws, list(grouped)
+                )
+        except Exception as exc:  # noqa: BLE001 - تبِ نمایشی، نه داده
+            logger.warning("ساختِ تبِ خلاصه ناموفق بود: %s", exc)
+            return False
+        return True
+
     async def ensure_user_spreadsheet(self, user_id: int, title: str = "") -> str:
         """اسپردشیت اختصاصیِ کاربر را می‌سازد (اگر ندارد) و شناسه‌اش را می‌دهد.
 
