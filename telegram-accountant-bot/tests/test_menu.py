@@ -78,8 +78,8 @@ class TestSubmenus:
             "report": {"act:export"},
             "transactions": {"act:list", "act:search", "act:undo"},
             "invoice": {"act:newinvoice", "act:products", "act:invoices"},
-            "business": {"act:industry", "act:branches", "act:join",
-                         "act:leave", "act:dollar", "act:rate"},
+            "business": {"act:bizname", "act:industry", "act:branches",
+                         "act:join", "act:leave", "act:dollar", "act:rate"},
             "account": {"act:plans", "act:backup", "act:help"},
         }
         for name, wanted in expected.items():
@@ -93,7 +93,7 @@ class TestSubmenus:
         handled = {
             "search", "join", "newinvoice", "plans", "rate",
             "export", "list", "undo", "products", "invoices", "remind",
-            "industry", "branches", "leave", "dollar", "backup", "help",
+            "industry", "bizname", "branches", "leave", "dollar", "backup", "help",
         }
         assert actions <= handled, f"بدونِ هندلر: {actions - handled}"
 

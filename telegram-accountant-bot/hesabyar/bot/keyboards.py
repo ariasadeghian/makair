@@ -96,7 +96,10 @@ def invoice_menu() -> InlineKeyboardMarkup:
 def business_menu() -> InlineKeyboardMarkup:
     """زیرمنوی کسب‌وکار: صنف، شعبه‌ها و نرخ دلار."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(texts.BTN_M_INDUSTRY, callback_data="act:industry")],
+        [
+            InlineKeyboardButton(texts.BTN_M_BIZNAME, callback_data="act:bizname"),
+            InlineKeyboardButton(texts.BTN_M_INDUSTRY, callback_data="act:industry"),
+        ],
         [
             InlineKeyboardButton(texts.BTN_M_BRANCHES, callback_data="act:branches"),
             InlineKeyboardButton(texts.BTN_M_JOIN, callback_data="act:join"),
@@ -325,16 +328,35 @@ def branch_menu() -> InlineKeyboardMarkup:
     ])
 
 
-def industry_picker() -> InlineKeyboardMarkup:
+def industry_picker(skippable: bool = False) -> InlineKeyboardMarkup:
     """انتخابگر صنفِ کسب‌وکار (یک دکمه در هر ردیف تا متن‌ها جا شوند).
 
-    ردیفِ آخر «لغو» است تا این سؤال در شروعِ کار قابلِ رد کردن باشد.
+    ``skippable`` در ویزاردِ شروع درست است تا کاربر بتواند این مرحله را رد
+    کند و بعداً از «🏢 کسب‌وکار» تکمیلش کند.
     """
     rows = [
         [InlineKeyboardButton(ind.label, callback_data=f"ind:{ind.key}")]
         for ind in industries.all_industries()
     ]
+    if skippable:
+        rows.append(_skip_row())
     return with_cancel(InlineKeyboardMarkup(rows))
+
+
+def _skip_row() -> list:
+    return [InlineKeyboardButton(texts.BTN_ONBOARD_SKIP, callback_data="onboarding:skip")]
+
+
+def onboarding_step() -> InlineKeyboardMarkup:
+    """زیرِ هر مرحله‌ی متنیِ ویزارد: رد کردن، و خروجِ کامل."""
+    return with_cancel(InlineKeyboardMarkup([_skip_row()]))
+
+
+def onboarding_done() -> InlineKeyboardMarkup:
+    """پایانِ ویزارد: راهِ یک‌لمسی به راهنما."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(texts.BTN_M_HELP, callback_data="act:help")]]
+    )
 
 
 def report_periods() -> InlineKeyboardMarkup:

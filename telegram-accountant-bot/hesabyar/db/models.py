@@ -102,7 +102,7 @@ class User:
     TABLE = "users"
     COLUMNS = (
         "id", "business_name", "phone", "address", "currency", "created_at",
-        "business_type", "sheet_id",
+        "business_type", "sheet_id", "onboarded",
     )
 
     id: Optional[int] = None
@@ -115,12 +115,15 @@ class User:
     business_type: str = ""
     #: شناسه‌ی اسپردشیتِ اختصاصیِ همین کاربر (دفترِ خودش).
     sheet_id: Optional[str] = None
+    #: ویزاردِ شروع یک‌بار اجرا شده است؟ (حتی اگر کاربر مرحله‌ها را رد کرده
+    #: باشد) — تا با هر ``/start`` دوباره نپرسیم.
+    onboarded: bool = False
 
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.business_name), _s(self.phone),
             _s(self.address), _s(self.currency), _s(self.created_at),
-            _s(self.business_type), _s(self.sheet_id),
+            _s(self.business_type), _s(self.sheet_id), _s(self.onboarded),
         ]
 
     @classmethod
@@ -134,6 +137,9 @@ class User:
             created_at=_pdt(d.get("created_at")),
             business_type=_pstr(d.get("business_type")),
             sheet_id=(d.get("sheet_id") or None),
+            # ردیف‌های قدیمی این ستون را ندارند؛ اگر نامِ کسب‌وکار دارند یعنی
+            # از قبل راه افتاده‌اند و نباید دوباره ویزارد ببینند.
+            onboarded=_pbool(d.get("onboarded")) or bool(d.get("business_name")),
         )
 
 

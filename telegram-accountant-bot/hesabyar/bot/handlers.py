@@ -150,13 +150,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = await tx_service.get_or_create_user(session, uid)
         # شروع دوره‌ی آزمایشی رایگان برای کاربر جدید
         await sub_service.get_or_create_subscription(session, uid)
+        done = bool(user.onboarded)
+        if not done:
+            # همین حالا علامت می‌خورد: ویزارد یک‌بار پیشنهاد می‌شود، حتی اگر
+            # کاربر مرحله‌ها را رد کند یا نصفه رهایش کند.
+            user.onboarded = True
+            await session.update("users", user)
         session.commit()
-        has_name = bool(user.business_name)
-    if has_name:
-        await update.message.reply_text(texts.WELCOME_BACK, reply_markup=keyboards.main_menu())
-    else:
-        context.user_data["flow"] = "onboarding"
-        await update.message.reply_text(texts.WELCOME, reply_markup=keyboards.cancel_only())
+    if done:
+        return await update.message.reply_text(
+            texts.WELCOME_BACK, reply_markup=keyboards.main_menu()
+        )
+    context.user_data["flow"] = "onboarding"
+    await update.message.reply_text(
+        texts.WELCOME, reply_markup=keyboards.onboarding_step()
+    )
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -527,6 +535,8 @@ async def _route_text(
         return await _handle_statement(update, context, text)
     if flow == "branch_name":
         return await _handle_branch_flow(update, context, text)
+    if flow == "business_name":
+        return await _handle_business_name(update, context, text)
     if flow in ("invoice_customer", "invoice_items", "inv_discount", "inv_shipping"):
         return await _handle_invoice_flow(update, context, text, flow)
     if flow in ("prod_name", "prod_price"):
@@ -575,22 +585,74 @@ async def _route_text(
 
 
 async def _handle_onboarding(update, context, text: str) -> None:
+    """مرحله‌ی ۱ ویزارد: نامِ کسب‌وکار."""
     name = text.strip()
     if not name:
         return await update.message.reply_text(
-            texts.WELCOME, reply_markup=keyboards.cancel_only()
+            texts.WELCOME, reply_markup=keyboards.onboarding_step()
         )
     uid = update.effective_user.id
     with _session(context) as session:
         user = await tx_service.get_or_create_user(session, uid)
         user.business_name = name[:200]
         await session.update("users", user)
+    await _ask_industry(update, context, name)
+
+
+async def _ask_industry(update, context, name: str = "") -> None:
+    """مرحله‌ی ۲ ویزارد: صنفِ کسب‌وکار (دکمه‌ای و قابلِ رد کردن)."""
     _clear_flow(context)
-    # یک سؤالِ دکمه‌ای (قابل رد کردن) تا تجربه با صنفِ کاربر جور شود.
-    await update.message.reply_text(
-        texts.ONBOARD_ASK_INDUSTRY.format(name=name),
-        reply_markup=keyboards.industry_picker(),
+    context.user_data["onboarding"] = True
+    question = (
+        texts.ONBOARD_ASK_INDUSTRY.format(name=name) if name
+        else texts.ONBOARD_ASK_INDUSTRY_ANON
     )
+    await update.message.reply_text(
+        question, reply_markup=keyboards.industry_picker(skippable=True)
+    )
+
+
+async def on_onboarding_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌ی «⏭ رد کردن این مرحله» در ویزاردِ شروع.
+
+    ردکردن یعنی آن فیلد خالی می‌ماند؛ بعداً از «🏢 کسب‌وکار» پر می‌شود.
+    """
+    query = update.callback_query
+    await query.answer()
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+    shim = _CallbackUpdate(update)
+    if context.user_data.get("flow") == "onboarding":  # مرحله‌ی نام رد شد
+        _clear_flow(context)
+        return await _ask_industry(shim, context)
+    await _finish_onboarding(shim, context)  # مرحله‌ی صنف رد شد
+
+
+async def _finish_onboarding(update, context, industry: str = "") -> None:
+    """پیامِ پایانیِ ویزارد: چه کارهایی می‌شود کرد + کیبوردِ ۶بخشی."""
+    context.user_data.pop("onboarding", None)
+    body = texts.ONBOARD_FINISHED
+    if industry:
+        body += _industry_extras(industry)
+    await update.message.reply_text(
+        body, parse_mode="HTML", reply_markup=keyboards.onboarding_done()
+    )
+    await update.message.reply_text(
+        texts.MENU_MAIN, reply_markup=keyboards.main_menu()
+    )
+
+
+def _industry_extras(key: str) -> str:
+    """مثالِ آماده + نکته‌های همان صنف."""
+    extras = f"\n\n🚀 همین الان امتحان کن: «{industries.example_for(key)}»"
+    tips = industries.tips_for(key)
+    if tips:
+        extras += texts.INDUSTRY_TIPS_HEADER
+        for tip in tips:
+            extras += f"\n• {tip}"
+    return extras
 
 
 def _industry_welcome(key: str) -> str:
@@ -619,9 +681,37 @@ async def on_industry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _safe_edit(query, texts.INDUSTRY_CHANGED.format(
         label=industries.label_for(key)
     ))
+    if context.user_data.get("onboarding"):  # آخرین مرحله‌ی ویزارد
+        return await _finish_onboarding(_CallbackUpdate(update), context, key)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=_industry_welcome(key),
+        reply_markup=keyboards.main_menu(),
+    )
+
+
+async def bizname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """تغییرِ نامِ کسب‌وکار — راهِ جبرانِ مرحله‌ی ردشده‌ی ویزارد."""
+    context.user_data["flow"] = "business_name"
+    await update.message.reply_text(
+        texts.BIZNAME_ASK, reply_markup=keyboards.cancel_only()
+    )
+
+
+async def _handle_business_name(update, context, text: str) -> None:
+    name = text.strip()
+    if not name:
+        return await update.message.reply_text(
+            texts.BIZNAME_ASK, reply_markup=keyboards.cancel_only()
+        )
+    uid = update.effective_user.id
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        user.business_name = name[:200]
+        await session.update("users", user)
+    _clear_flow(context)
+    await update.message.reply_text(
+        texts.BIZNAME_SAVED.format(name=name[:200]),
         reply_markup=keyboards.main_menu(),
     )
 
@@ -2419,6 +2509,7 @@ async def on_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "invoices": invoices_cmd,
         "remind": remind_cmd,
         "industry": industry_cmd,
+        "bizname": bizname_cmd,
         "branches": branches_cmd,
         "leave": leave_cmd,
         "dollar": dollar_cmd,
@@ -2700,6 +2791,9 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
     application.add_handler(CallbackQueryHandler(on_industry, pattern=r"^ind:"))
+    application.add_handler(
+        CallbackQueryHandler(on_onboarding_skip, pattern=r"^onboarding:skip$")
+    )
     application.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
     application.add_handler(CallbackQueryHandler(on_menu_action, pattern=r"^act:"))
     application.add_handler(CallbackQueryHandler(on_invoice_history, pattern=r"^invh:"))
