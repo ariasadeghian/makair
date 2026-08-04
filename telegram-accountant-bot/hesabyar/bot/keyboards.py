@@ -15,13 +15,85 @@ from . import texts
 
 
 def main_menu() -> ReplyKeyboardMarkup:
-    """منوی اصلی همیشگی زیر کادر تایپ."""
+    """منوی اصلی همیشگی زیر کادر تایپ: ۶ بخش، دو‌تا در هر ردیف."""
     keyboard = [
-        [KeyboardButton(texts.BTN_REPORT), KeyboardButton(texts.BTN_LEDGER)],
-        [KeyboardButton(texts.BTN_INVOICE), KeyboardButton(texts.BTN_SUBSCRIPTION)],
-        [KeyboardButton(texts.BTN_HELP)],
+        [KeyboardButton(texts.BTN_REPORT), KeyboardButton(texts.BTN_TRANSACTIONS)],
+        [KeyboardButton(texts.BTN_LEDGER), KeyboardButton(texts.BTN_INVOICE)],
+        [KeyboardButton(texts.BTN_BUSINESS), KeyboardButton(texts.BTN_ACCOUNT)],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+def _back_row() -> list:
+    """ردیف آخرِ هر زیرمنو: بازگشت به منوی اصلی."""
+    return [InlineKeyboardButton(texts.BTN_BACK_MAIN, callback_data="menu:main")]
+
+
+def report_menu() -> InlineKeyboardMarkup:
+    """زیرمنوی گزارش و داشبورد."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("امروز", callback_data="report:day"),
+            InlineKeyboardButton("این هفته", callback_data="report:week"),
+            InlineKeyboardButton("این ماه", callback_data="report:month"),
+        ],
+        [InlineKeyboardButton(texts.BTN_DASHBOARD, callback_data="dash:show")],
+        [InlineKeyboardButton(texts.BTN_M_EXPORT, callback_data="act:export")],
+        _back_row(),
+    ])
+
+
+def transactions_menu() -> InlineKeyboardMarkup:
+    """زیرمنوی تراکنش‌ها."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_M_LIST, callback_data="act:list")],
+        [
+            InlineKeyboardButton(texts.BTN_M_SEARCH, callback_data="act:search"),
+            InlineKeyboardButton(texts.BTN_M_UNDO, callback_data="act:undo"),
+        ],
+        _back_row(),
+    ])
+
+
+def invoice_menu() -> InlineKeyboardMarkup:
+    """زیرمنوی فاکتور و کالاها."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_M_NEW_INVOICE, callback_data="act:newinvoice")],
+        [
+            InlineKeyboardButton(texts.BTN_M_PRODUCTS, callback_data="act:products"),
+            InlineKeyboardButton(texts.BTN_M_INVOICES, callback_data="act:invoices"),
+        ],
+        _back_row(),
+    ])
+
+
+def business_menu() -> InlineKeyboardMarkup:
+    """زیرمنوی کسب‌وکار: صنف، شعبه‌ها و نرخ دلار."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_M_INDUSTRY, callback_data="act:industry")],
+        [
+            InlineKeyboardButton(texts.BTN_M_BRANCHES, callback_data="act:branches"),
+            InlineKeyboardButton(texts.BTN_M_JOIN, callback_data="act:join"),
+        ],
+        [
+            InlineKeyboardButton(texts.BTN_M_DOLLAR, callback_data="act:dollar"),
+            InlineKeyboardButton(texts.BTN_M_RATE, callback_data="act:rate"),
+        ],
+        [InlineKeyboardButton(texts.BTN_M_LEAVE, callback_data="act:leave")],
+        _back_row(),
+    ])
+
+
+def account_menu() -> InlineKeyboardMarkup:
+    """زیرمنوی اشتراک و پشتیبانی."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_M_PLANS, callback_data="act:plans")],
+        [
+            InlineKeyboardButton(texts.BTN_M_BACKUP, callback_data="act:backup"),
+            InlineKeyboardButton(texts.BTN_M_HELP, callback_data="act:help"),
+        ],
+        _back_row(),
+    ])
 
 
 def subscription_plans() -> InlineKeyboardMarkup:
@@ -215,5 +287,7 @@ def ledger_menu() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(texts.BTN_LEDGER_LIST, callback_data="ledger:list")],
             [InlineKeyboardButton(texts.BTN_PARTY_STATEMENT, callback_data="ledger:statement")],
+            [InlineKeyboardButton(texts.BTN_M_REMIND, callback_data="act:remind")],
+            _back_row(),
         ]
     )

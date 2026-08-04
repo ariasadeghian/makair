@@ -1,12 +1,47 @@
 """متن‌های فارسی رابط کاربری بات."""
 from __future__ import annotations
 
-# دکمه‌های منوی اصلی
-BTN_REPORT = "📊 گزارش"
+# دکمه‌های منوی اصلی (۶ بخش، دو‌تا در هر ردیف)
+BTN_REPORT = "📊 گزارش و داشبورد"
+BTN_TRANSACTIONS = "💰 تراکنش‌ها"
 BTN_LEDGER = "📒 طلب و بدهی"
-BTN_INVOICE = "🧾 صدور فاکتور"
-BTN_SUBSCRIPTION = "⭐ اشتراک"
+BTN_INVOICE = "🧾 فاکتور و کالاها"
+BTN_BUSINESS = "🏢 کسب‌وکار"
+BTN_ACCOUNT = "⭐ اشتراک و پشتیبانی"
+
+# سازگاری با کد/متن‌های قدیمی
+BTN_SUBSCRIPTION = BTN_ACCOUNT
 BTN_HELP = "❓ راهنما"
+
+# عنوانِ هر زیرمنو
+MENU_MAIN = "یکی از بخش‌های زیر را انتخاب کنید: 👇"
+MENU_REPORT = "📊 <b>گزارش و داشبورد</b> — چه چیزی را ببینیم؟"
+MENU_TRANSACTIONS = "💰 <b>تراکنش‌ها</b> — چه کاری انجام دهیم؟"
+MENU_INVOICE = "🧾 <b>فاکتور و کالاها</b>"
+MENU_BUSINESS = "🏢 <b>کسب‌وکار</b> — تنظیمات و شعبه‌ها"
+MENU_ACCOUNT = "⭐ <b>اشتراک و پشتیبانی</b>"
+BTN_BACK_MAIN = "🔙 بازگشت به منوی اصلی"
+
+# دکمه‌های داخل زیرمنوها
+BTN_M_EXPORT = "📥 خروجی اکسل"
+BTN_M_LIST = "🧾 فهرست تراکنش‌ها"
+BTN_M_SEARCH = "🔎 جست‌وجو"
+BTN_M_UNDO = "↩️ لغو آخرین ثبت"
+BTN_M_NEW_INVOICE = "➕ فاکتور جدید"
+BTN_M_PRODUCTS = "🛍 مدیریت کالاها"
+BTN_M_INVOICES = "📄 فاکتورهای اخیر"
+BTN_M_REMIND = "⏰ یادآوری بدهکاران"
+BTN_M_INDUSTRY = "🏷 نوع کسب‌وکار"
+BTN_M_BRANCHES = "🏬 شعبه‌ها"
+BTN_M_JOIN = "🔑 پیوستن به شعبه"
+BTN_M_LEAVE = "🚪 خروج از شعبه"
+BTN_M_DOLLAR = "💵 نمای دلاری"
+BTN_M_RATE = "💱 نرخ دلار"
+BTN_M_PLANS = "⭐ پلن‌های اشتراک"
+BTN_M_BACKUP = "📦 پشتیبان کامل"
+BTN_M_HELP = "❓ راهنما"
+
+SEARCH_ASK = "چه کلمه‌ای را جست‌وجو کنم؟ (مثلاً «اجاره»)"
 
 # دکمه‌های عمومی
 BTN_CANCEL = "لغو"

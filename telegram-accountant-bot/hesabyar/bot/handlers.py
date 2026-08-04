@@ -454,23 +454,25 @@ async def _route_text(
     if flow == "edit_amount":
         return await _handle_edit_amount(update, context, text)
 
-    # دکمه‌های منوی اصلی
+    # جست‌وجو از طریق منو (به‌جای تایپِ /search کلمه)
+    if flow == "search_query":
+        _clear_flow(context)
+        context.args = text.split()
+        return await search_cmd(update, context)
+    # پیوستن به شعبه از طریق منو
+    if flow == "join_code":
+        _clear_flow(context)
+        return await _join_with_code(update, context, text)
+
+    # ۶ دکمه‌ی منوی اصلی ⇒ زیرمنوی شیشه‌ای مربوطه
+    submenu = _MAIN_MENU.get(text)
+    if submenu is not None:
+        title, markup = submenu
+        return await update.message.reply_text(
+            title, parse_mode="HTML", reply_markup=markup()
+        )
     if text == texts.BTN_HELP:
         return await help_cmd(update, context)
-    if text == texts.BTN_REPORT:
-        return await update.message.reply_text(
-            texts.REPORT_CHOOSE_PERIOD, reply_markup=keyboards.report_periods()
-        )
-    if text == texts.BTN_LEDGER:
-        return await update.message.reply_text(
-            texts.LEDGER_MENU, reply_markup=keyboards.ledger_menu()
-        )
-    if text == texts.BTN_INVOICE:
-        context.user_data["flow"] = "invoice_customer"
-        context.user_data["invoice"] = {"items": [], "discount": 0, "shipping": 0}
-        return await update.message.reply_text(texts.INVOICE_ASK_CUSTOMER)
-    if text == texts.BTN_SUBSCRIPTION:
-        return await _show_subscription(update, context)
     if text == texts.BTN_CANCEL:
         return await cancel(update, context)
 
@@ -1971,6 +1973,127 @@ async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _grp_edit(query, f"{head}\n\n{report}")
 
 
+# --- منوی ۶بخشی و زیرمنوهای شیشه‌ای --------------------------------------------
+
+#: متنِ دکمه‌ی منوی اصلی → (عنوانِ زیرمنو، سازنده‌ی کیبورد)
+_MAIN_MENU: dict = {}
+
+
+def _init_main_menu() -> None:
+    """نگاشت دکمه‌های منوی اصلی (بعد از تعریفِ texts/keyboards پر می‌شود)."""
+    _MAIN_MENU.update({
+        texts.BTN_REPORT: (texts.MENU_REPORT, keyboards.report_menu),
+        texts.BTN_TRANSACTIONS: (texts.MENU_TRANSACTIONS, keyboards.transactions_menu),
+        texts.BTN_LEDGER: (texts.LEDGER_MENU, keyboards.ledger_menu),
+        texts.BTN_INVOICE: (texts.MENU_INVOICE, keyboards.invoice_menu),
+        texts.BTN_BUSINESS: (texts.MENU_BUSINESS, keyboards.business_menu),
+        texts.BTN_ACCOUNT: (texts.MENU_ACCOUNT, keyboards.account_menu),
+    })
+
+
+_init_main_menu()
+
+
+class _CallbackUpdate:
+    """آداپتورِ CallbackQuery به شکلِ یک Update با ``.message``.
+
+    دستورهای موجود (``list_cmd``، ``export_cmd`` و…) با ``update.message``
+    جواب می‌دهند؛ این آداپتور اجازه می‌دهد بدون بازنویسی، از دکمه‌های منو هم
+    صدایشان بزنیم — پیامِ بات به‌عنوان مرجعِ reply استفاده می‌شود.
+    """
+
+    def __init__(self, update: Update):
+        query = update.callback_query
+        self.message = query.message
+        self.callback_query = query
+        self.effective_user = update.effective_user
+        self.effective_chat = update.effective_chat
+        self.effective_message = query.message
+
+
+async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌ی «بازگشت به منوی اصلی» و بازکردنِ دوباره‌ی یک زیرمنو."""
+    query = update.callback_query
+    await query.answer()
+    what = query.data.split(":", 1)[1]
+    if what == "main":
+        _clear_flow(context)
+        await _safe_edit(query, texts.MENU_MAIN)
+        return await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=texts.MENU_MAIN,
+            reply_markup=keyboards.main_menu(),
+        )
+
+
+async def _join_with_code(update, context, code: str) -> None:
+    """پیوستن به شعبه با کدی که کاربر فرستاده (از دستور یا از منو)."""
+    store = _store(context)
+    member = await branch_service.join_with_code(
+        store, update.effective_user.id, code,
+        name=_display_name(update.effective_user),
+    )
+    if member is None:
+        return await update.message.reply_text(texts.JOIN_BAD_CODE)
+    await store.flush()
+    branch = branch_service.get_branch(store, member.branch_id)
+    await update.message.reply_text(
+        texts.JOIN_OK.format(branch=branch.name if branch else "شعبه"),
+        parse_mode="HTML", reply_markup=keyboards.main_menu(),
+    )
+
+
+async def on_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """اجرای اکشن‌های زیرمنوها (``act:*``) با استفاده از همان منطقِ موجود."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":", 1)[1]
+    shim = _CallbackUpdate(update)
+
+    # اکشن‌هایی که ورودیِ متنی می‌خواهند ⇒ یک جریانِ کوتاه شروع می‌شود
+    if action == "search":
+        context.user_data["flow"] = "search_query"
+        return await query.message.reply_text(texts.SEARCH_ASK)
+    if action == "join":
+        context.user_data["flow"] = "join_code"
+        return await query.message.reply_text(texts.JOIN_ASK_CODE, parse_mode="HTML")
+    if action == "newinvoice":
+        context.user_data["flow"] = "invoice_customer"
+        context.user_data["invoice"] = {"items": [], "discount": 0, "shipping": 0}
+        return await query.message.reply_text(texts.INVOICE_ASK_CUSTOMER)
+    if action == "plans":
+        return await _show_subscription(shim, context)
+    if action == "rate":  # از منو فقط نمایش نرخ (ثبت با /rate عدد)
+        latest = rates_service.latest_rate(_store(context))
+        if latest is None:
+            return await query.message.reply_text(texts.RATE_NONE, parse_mode="HTML")
+        return await query.message.reply_text(
+            texts.RATE_CURRENT.format(
+                rate=money.format_amount(latest.usd),
+                date=jalali.format_date(latest.date),
+            ),
+            parse_mode="HTML",
+        )
+
+    handlers_by_action = {
+        "export": export_cmd,
+        "list": list_cmd,
+        "undo": undo_cmd,
+        "products": products_cmd,
+        "invoices": invoices_cmd,
+        "remind": remind_cmd,
+        "industry": industry_cmd,
+        "branches": branches_cmd,
+        "leave": leave_cmd,
+        "dollar": dollar_cmd,
+        "backup": backup_cmd,
+        "help": help_cmd,
+    }
+    handler = handlers_by_action.get(action)
+    if handler is not None:
+        await handler(shim, context)
+
+
 # --- یادآوری بدهی به خودِ مشتری ------------------------------------------------
 
 
@@ -2089,22 +2212,10 @@ async def _handle_branch_flow(update, context, text: str) -> None:
 
 async def join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """دستور /join — پیوستن کارمند به شعبه با کد."""
-    uid = update.effective_user.id
     code = (update.message.text or "").partition(" ")[2].strip()
     if not code:
         return await update.message.reply_text(texts.JOIN_ASK_CODE, parse_mode="HTML")
-    store = _store(context)
-    member = await branch_service.join_with_code(
-        store, uid, code, name=_display_name(update.effective_user)
-    )
-    if member is None:
-        return await update.message.reply_text(texts.JOIN_BAD_CODE)
-    await store.flush()
-    branch = branch_service.get_branch(store, member.branch_id)
-    await update.message.reply_text(
-        texts.JOIN_OK.format(branch=branch.name if branch else "شعبه"),
-        parse_mode="HTML", reply_markup=keyboards.main_menu(),
-    )
+    await _join_with_code(update, context, code)
 
 
 async def leave_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2238,6 +2349,8 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
     application.add_handler(CallbackQueryHandler(on_industry, pattern=r"^ind:"))
+    application.add_handler(CallbackQueryHandler(on_menu, pattern=r"^menu:"))
+    application.add_handler(CallbackQueryHandler(on_menu_action, pattern=r"^act:"))
     application.add_handler(CallbackQueryHandler(on_invoice_history, pattern=r"^invh:"))
     application.add_handler(CallbackQueryHandler(on_rating, pattern=r"^rate:"))
     application.add_handler(CallbackQueryHandler(on_debtor_remind, pattern=r"^dremind:"))
