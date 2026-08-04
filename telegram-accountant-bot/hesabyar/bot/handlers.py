@@ -2371,28 +2371,34 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # --- ثبت هندلرها --------------------------------------------------------------
 
+#: کامندهایی که در منوی «/» تلگرام تبلیغ می‌شوند (``app.CORE_COMMANDS``).
+PUBLIC_COMMANDS = ("start", "help", "cancel", "undo")
+
+#: کامندهایی که از منوی «/» برداشته شده‌اند ولی زنده مانده‌اند — alias مخفی
+#: برای کسانی که عادت به تایپ دارند. مسیرِ اصلیِ هرکدام دکمه‌ای در منوی
+#: ۶بخشیِ فاز ۳ است؛ دو استثنا: ``balance`` مخصوصِ گروه است (آنجا کیبوردِ منو
+#: وجود ندارد) و ``pilot`` فقط برای ادمین.
+ALIAS_COMMANDS = (
+    "export", "search", "backup", "dashboard", "list", "products",
+    "balance", "pilot", "industry", "invoices", "dollar", "rate",
+    "remind", "branches", "join", "leave",
+)
+
+#: نگاشتِ نامِ کامند به تابعش — تنها منبعِ حقیقت برای ثبتِ ``CommandHandler``ها.
+COMMAND_HANDLERS = {
+    "start": start, "help": help_cmd, "cancel": cancel, "undo": undo_cmd,
+    "export": export_cmd, "search": search_cmd, "backup": backup_cmd,
+    "dashboard": dashboard_cmd, "list": list_cmd, "products": products_cmd,
+    "balance": balance_cmd, "pilot": pilot_cmd, "industry": industry_cmd,
+    "invoices": invoices_cmd, "dollar": dollar_cmd, "rate": rate_cmd,
+    "remind": remind_cmd, "branches": branches_cmd, "join": join_cmd,
+    "leave": leave_cmd,
+}
+
 
 def register(application: Application) -> None:
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(CommandHandler("cancel", cancel))
-    application.add_handler(CommandHandler("undo", undo_cmd))
-    application.add_handler(CommandHandler("export", export_cmd))
-    application.add_handler(CommandHandler("search", search_cmd))
-    application.add_handler(CommandHandler("backup", backup_cmd))
-    application.add_handler(CommandHandler("dashboard", dashboard_cmd))
-    application.add_handler(CommandHandler("list", list_cmd))
-    application.add_handler(CommandHandler("products", products_cmd))
-    application.add_handler(CommandHandler("balance", balance_cmd))
-    application.add_handler(CommandHandler("pilot", pilot_cmd))
-    application.add_handler(CommandHandler("industry", industry_cmd))
-    application.add_handler(CommandHandler("invoices", invoices_cmd))
-    application.add_handler(CommandHandler("dollar", dollar_cmd))
-    application.add_handler(CommandHandler("rate", rate_cmd))
-    application.add_handler(CommandHandler("remind", remind_cmd))
-    application.add_handler(CommandHandler("branches", branches_cmd))
-    application.add_handler(CommandHandler("join", join_cmd))
-    application.add_handler(CommandHandler("leave", leave_cmd))
+    for name, handler in COMMAND_HANDLERS.items():
+        application.add_handler(CommandHandler(name, handler))
     # لغوِ جریان‌های چندمرحله‌ای — پیش از بقیه، چون از هر کیبوردی می‌آید
     application.add_handler(
         CallbackQueryHandler(on_flow_cancel, pattern=r"^flow:cancel$")

@@ -5,7 +5,11 @@ import asyncio
 import datetime as dt
 import logging
 
-from telegram import BotCommand
+from telegram import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+)
 from telegram.ext import Application
 
 from ..config import Settings
@@ -17,6 +21,41 @@ from ..services import stt as stt_service
 from . import handlers, reminders
 
 logger = logging.getLogger(__name__)
+
+#: تنها کامندهایی که در منوی «/» تلگرام تبلیغ می‌شوند. بقیه‌ی کامندها به‌عنوان
+#: alias مخفی زنده می‌مانند — هرکس تایپشان کند کار می‌کنند — ولی مسیرِ اصلی
+#: منوی ۶بخشیِ پایینِ صفحه است، نه حفظ‌کردنِ بیست تا اسم.
+CORE_COMMANDS = (
+    ("start", "شروع / منوی اصلی"),
+    ("help", "راهنما"),
+    ("cancel", "لغو عملیات"),
+    ("undo", "لغو آخرین ثبت"),
+)
+
+#: در گروه، کیبوردِ منو وجود ندارد؛ پس دفترِ گروه باید کامند بماند.
+GROUP_COMMANDS = (
+    ("start", "معرفی بات در گروه"),
+    ("help", "راهنما"),
+    ("balance", "وضعیت مالی گروه"),
+)
+
+
+def _bot_commands(pairs) -> list[BotCommand]:
+    return [BotCommand(name, description) for name, description in pairs]
+
+
+async def publish_command_menu(bot) -> None:
+    """فهرستِ کامندهای دیده‌شده در دکمه‌ی «/» را روی تلگرام می‌نویسد.
+
+    اسکوپِ پیش‌فرض هم بازنویسی می‌شود، وگرنه فهرستِ بلندِ نسخه‌های قبلی که روی
+    سرورِ تلگرام مانده همچنان به کاربرهای قدیمی نشان داده می‌شود.
+    """
+    core = _bot_commands(CORE_COMMANDS)
+    await bot.set_my_commands(core)
+    await bot.set_my_commands(core, scope=BotCommandScopeAllPrivateChats())
+    await bot.set_my_commands(
+        _bot_commands(GROUP_COMMANDS), scope=BotCommandScopeAllGroupChats()
+    )
 
 
 async def _on_startup(application: Application) -> None:
@@ -77,26 +116,9 @@ async def _on_startup(application: Application) -> None:
             username = ""
     application.bot_data["bot_username"] = username
 
-    # منوی دستورات تلگرام (دکمه‌ی «/») برای کشف‌پذیری بهتر.
+    # منوی دستورات تلگرام (دکمه‌ی «/») — فقط ۴ کامند اصلی.
     try:
-        await application.bot.set_my_commands([
-            BotCommand("start", "شروع / منوی اصلی"),
-            BotCommand("help", "راهنما"),
-            BotCommand("list", "تراکنش‌های اخیر"),
-            BotCommand("invoices", "فاکتورهای اخیر (ارسال دوباره)"),
-            BotCommand("dashboard", "داشبورد تصویری"),
-            BotCommand("dollar", "نمای دلاری درآمد"),
-            BotCommand("remind", "یادآوری بدهی به مشتری"),
-            BotCommand("branches", "شعبه‌های من"),
-            BotCommand("export", "خروجی اکسل"),
-            BotCommand("backup", "پشتیبان کامل"),
-            BotCommand("search", "جست‌وجو در تراکنش‌ها"),
-            BotCommand("products", "کالاهای من"),
-            BotCommand("industry", "نوع کسب‌وکار من"),
-            BotCommand("balance", "وضعیت مالی گروه"),
-            BotCommand("undo", "لغو آخرین ثبت"),
-            BotCommand("cancel", "لغو"),
-        ])
+        await publish_command_menu(application.bot)
     except Exception:  # noqa: BLE001 - منوی دستورات ضروری نیست
         logger.warning("تنظیم منوی دستورات ناموفق بود.")
 
