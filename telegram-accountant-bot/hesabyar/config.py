@@ -69,9 +69,9 @@ class Settings:
     reminder_minute: int = 0
     # چند روز قبل از سررسید هم پیشاپیش یادآوری شود (۰ = فقط روز سررسید و معوق)
     reminder_lead_days: int = 2
-    # خلاصه‌ی خودکار شبانه‌ی فعالیت مالی (فقط برای کاربرانِ فعالِ امروز)
+    # خلاصه‌ی خودکار آخر روز (فقط برای کاربرانِ فعالِ امروز)
     nightly_summary: bool = True
-    nightly_summary_hour: int = 21
+    nightly_summary_hour: int = 22
     # سرویس OCR اختیاری (سازگار با API نوع OpenAI برای مدل‌های تصویری)
     ocr_base_url: str | None = None
     ocr_api_key: str | None = None
@@ -181,8 +181,14 @@ def load_settings(require_token: bool = True) -> Settings:
         reminder_hour=_get_int("REMINDER_HOUR", 9),
         reminder_minute=_get_int("REMINDER_MINUTE", 0),
         reminder_lead_days=_get_int("REMINDER_LEAD_DAYS", 2),
-        nightly_summary=_get_bool("NIGHTLY_SUMMARY", True),
-        nightly_summary_hour=_get_int("NIGHTLY_SUMMARY_HOUR", 21),
+        nightly_summary=_get_bool(
+            "DAILY_SUMMARY", _get_bool("NIGHTLY_SUMMARY", True)
+        ),
+        # نام تازه DAILY_SUMMARY_HOUR است؛ NIGHTLY_SUMMARY_HOUR برای
+        # ‏.envهای موجود همچنان خوانده می‌شود.
+        nightly_summary_hour=_get_int(
+            "DAILY_SUMMARY_HOUR", _get_int("NIGHTLY_SUMMARY_HOUR", 22)
+        ),
         ocr_base_url=_get("OCR_BASE_URL"),
         ocr_api_key=_get("OCR_API_KEY"),
         ocr_model=_get("OCR_MODEL", "gpt-4o-mini"),

@@ -209,6 +209,13 @@ def invoice_builder(products, has_items: bool) -> InlineKeyboardMarkup:
     return with_cancel(InlineKeyboardMarkup(rows))
 
 
+def daily_summary_actions() -> InlineKeyboardMarkup:
+    """زیرِ خلاصه‌ی آخر روز: راهِ یک‌لمسی به گزارشِ کامل."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_FULL_REPORT, callback_data="menu:report")]
+    ])
+
+
 def recent_customers_picker(customers) -> InlineKeyboardMarkup:
     """مشتریانِ اخیر به‌صورت دکمه، زیرِ سؤالِ «نامِ مشتری؟».
 

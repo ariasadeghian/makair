@@ -9,7 +9,10 @@ import datetime as dt
 
 from ..core import jalali, money
 from ..db.store import Store
-from . import transactions
+from . import ledger, transactions
+
+#: «نزدیکِ سررسید» یعنی تا این تعداد روزِ آینده.
+DUE_SOON_DAYS = 2
 
 # نگاشت نام دوره به تابع بازه‌ی متناظر در ماژول jalali.
 _BOUNDS = {
@@ -83,6 +86,35 @@ def build_report(
     return "\n".join(lines)
 
 
+def _created_today(store: Store, table: str, user_id: int, start, end) -> int:
+    """تعداد ردیف‌هایی از یک جدول که امروز ساخته شده‌اند."""
+    return len(store.list(
+        table,
+        lambda row: row.user_id == user_id and row.created_at is not None
+        and start <= row.created_at <= end,
+    ))
+
+
+def daily_activity(store: Store, user_id: int, now: dt.datetime) -> dict:
+    """آمارِ «امروز»ِ یک کاربر — پایه‌ی خلاصه‌ی شبانه.
+
+    «فعالیت» فقط تراکنش نیست: صدور فاکتور و ثبتِ طلب/بدهی هم روزِ کاری را
+    فعال می‌کند، وگرنه کسی که امروز فقط فاکتور زده هیچ خلاصه‌ای نمی‌گرفت.
+    """
+    start, end = jalali.day_bounds(now)
+    data = transactions.summary(store, user_id, start, end)
+    invoices = _created_today(store, "invoices", user_id, start, end)
+    entries = _created_today(store, "ledger_entries", user_id, start, end)
+    return {
+        **data,
+        "start": start,
+        "invoices": invoices,
+        "ledger_entries": entries,
+        "due_soon": len(ledger.due_within(store, user_id, DUE_SOON_DAYS, now)),
+        "active": bool(data["count"] or invoices or entries),
+    }
+
+
 def build_daily_digest(
     store: Store, user_id: int, now: dt.datetime
 ) -> str | None:
@@ -91,19 +123,32 @@ def build_daily_digest(
     برای پیام خودکار شبانه استفاده می‌شود؛ کاربرانِ بدون فعالیتِ امروز پیامی
     نمی‌گیرند تا مزاحمت ایجاد نشود.
     """
-    start, end = jalali.day_bounds(now)
-    data = transactions.summary(store, user_id, start, end)
-    if data["count"] == 0:
+    stats = daily_activity(store, user_id, now)
+    if not stats["active"]:
         return None
 
-    balance = data["balance"]
+    balance = stats["balance"]
     balance_emoji = "🟢" if balance >= 0 else "🔴"
     lines = [
-        f"🌙 <b>خلاصه‌ی امروز</b> ({jalali.format_date(start)})",
+        f"🌙 <b>خلاصه‌ی امروز</b> ({jalali.format_date(stats['start'])})",
         "",
-        f"💰 درآمد: {money.format_amount(data['income'])}",
-        f"💸 هزینه: {money.format_amount(data['expense'])}",
+        f"💰 درآمد: {money.format_amount(stats['income'])}",
+        f"💸 هزینه: {money.format_amount(stats['expense'])}",
         f"{balance_emoji} مانده‌ی امروز: {money.format_amount(balance)}",
-        f"🧾 {money.to_persian_digits(str(data['count']))} تراکنش",
+        f"🧾 {money.to_persian_digits(str(stats['count']))} تراکنش",
     ]
+    if stats["invoices"]:
+        lines.append(
+            f"📄 {money.to_persian_digits(str(stats['invoices']))} فاکتور صادر شد"
+        )
+    if stats["ledger_entries"]:
+        lines.append(
+            f"📒 {money.to_persian_digits(str(stats['ledger_entries']))} ثبت در دفتر"
+        )
+    if stats["due_soon"]:
+        lines.append("")
+        lines.append(
+            f"⏰ {money.to_persian_digits(str(stats['due_soon']))} مورد نزدیکِ سررسید "
+            f"(تا {money.to_persian_digits(str(DUE_SOON_DAYS))} روز آینده)"
+        )
     return "\n".join(lines)

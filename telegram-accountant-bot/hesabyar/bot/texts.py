@@ -21,6 +21,7 @@ MENU_INVOICE = "🧾 <b>فاکتور و کالاها</b>"
 MENU_BUSINESS = "🏢 <b>کسب‌وکار</b> — تنظیمات و شعبه‌ها"
 MENU_ACCOUNT = "⭐ <b>اشتراک و پشتیبانی</b>"
 BTN_BACK_MAIN = "🔙 بازگشت به منوی اصلی"
+BTN_FULL_REPORT = "📊 گزارش کامل"
 
 # دکمه‌های داخل زیرمنوها
 BTN_M_EXPORT = "📥 خروجی اکسل"

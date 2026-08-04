@@ -2289,6 +2289,10 @@ async def on_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 _MAIN_MENU: dict = {}
 
 
+#: کلیدِ زیرمنو (در ``menu:<key>``) → (عنوان، سازنده‌ی کیبورد)
+_SUBMENUS: dict = {}
+
+
 def _init_main_menu() -> None:
     """نگاشت دکمه‌های منوی اصلی (بعد از تعریفِ texts/keyboards پر می‌شود)."""
     _MAIN_MENU.update({
@@ -2298,6 +2302,14 @@ def _init_main_menu() -> None:
         texts.BTN_INVOICE: (texts.MENU_INVOICE, keyboards.invoice_menu),
         texts.BTN_BUSINESS: (texts.MENU_BUSINESS, keyboards.business_menu),
         texts.BTN_ACCOUNT: (texts.MENU_ACCOUNT, keyboards.account_menu),
+    })
+    _SUBMENUS.update({
+        "report": (texts.MENU_REPORT, keyboards.report_menu),
+        "transactions": (texts.MENU_TRANSACTIONS, keyboards.transactions_menu),
+        "ledger": (texts.LEDGER_MENU, keyboards.ledger_menu),
+        "invoice": (texts.MENU_INVOICE, keyboards.invoice_menu),
+        "business": (texts.MENU_BUSINESS, keyboards.business_menu),
+        "account": (texts.MENU_ACCOUNT, keyboards.account_menu),
     })
 
 
@@ -2333,6 +2345,12 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             chat_id=update.effective_chat.id,
             text=texts.MENU_MAIN,
             reply_markup=keyboards.main_menu(),
+        )
+    submenu = _SUBMENUS.get(what)
+    if submenu is not None:  # مثلاً «📊 گزارش کامل» زیرِ خلاصه‌ی شبانه
+        title, markup = submenu
+        await query.message.reply_text(
+            title, parse_mode="HTML", reply_markup=markup()
         )
 
 

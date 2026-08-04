@@ -173,11 +173,11 @@ def build_application(settings: Settings) -> Application:
             )
         if settings.nightly_summary:
             job_queue.run_daily(
-                reminders.send_nightly_summary,
+                reminders.daily_summary_job,
                 time=dt.time(
                     hour=settings.nightly_summary_hour, tzinfo=jalali.TEHRAN
                 ),
-                name="nightly_summary",
+                name="daily_summary",
             )
     else:
         logger.warning(

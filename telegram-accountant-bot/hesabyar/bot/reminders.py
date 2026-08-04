@@ -146,8 +146,12 @@ async def send_subscription_notices(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
 
 
-async def send_nightly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """خلاصه‌ی شبانه‌ی فعالیت را برای کاربرانی که «امروز» فعال بوده‌اند می‌فرستد."""
+async def daily_summary_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """خلاصه‌ی آخر روز را برای کاربرانی که «امروز» فعال بوده‌اند می‌فرستد.
+
+    کاربرِ بی‌فعالیت هیچ پیامی نمی‌گیرد — یک پیامِ شبانه‌ی «امروز هیچ‌چیز
+    نشد» فقط اسپم است.
+    """
     store = context.application.bot_data["store"]
     await store.load_all_users()  # این job بین‌کاربری است
     now = jalali.now()
@@ -157,7 +161,12 @@ async def send_nightly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
         try:
             await context.bot.send_message(
-                chat_id=user.id, text=digest, parse_mode="HTML"
+                chat_id=user.id, text=digest, parse_mode="HTML",
+                reply_markup=keyboards.daily_summary_actions(),
             )
         except Exception:
             continue
+
+
+#: نام قدیمی — همان job است.
+send_nightly_summary = daily_summary_job
