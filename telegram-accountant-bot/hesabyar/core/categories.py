@@ -4,7 +4,12 @@
 """
 from __future__ import annotations
 
+from . import fuzzy
 from ..db.models import Kind
+
+#: آستانه‌ی تطبیقِ تقریبیِ کلیدواژه‌ها — سخت‌گیرانه‌تر از پیش‌فرض، چون
+#: کلیدواژه‌ها کوتاه و پرشمارند و اشتباهِ اینجا دسته‌ی تراکنش را عوض می‌کند.
+FUZZY_THRESHOLD = 0.85
 
 # ترتیب مهم است: نخستین دسته‌ای که کلیدواژه‌اش پیدا شود انتخاب می‌شود.
 EXPENSE_CATEGORIES: list[tuple[str, tuple[str, ...]]] = [
@@ -49,6 +54,28 @@ def category_options(kind: str) -> list[str]:
     return labels
 
 
+def _fuzzy_category(text: str, table: list) -> str | None:
+    """دسته را از روی واژه‌ای که *تقریباً* کلیدواژه است پیدا می‌کند.
+
+    برای غلطِ تایپی و شکل‌های دیگرِ یک واژه («تبلیقات»، «کاغذی») تا یک
+    اشتباهِ کوچک کلِ تراکنش را به «متفرقه» نیندازد.
+    """
+    keyword_label = {}
+    for label, keywords in table:
+        for kw in keywords:
+            keyword_label.setdefault(kw.replace("‌", " "), label)
+
+    best_label, best_score = None, FUZZY_THRESHOLD
+    for word in fuzzy.normalize(text).split():
+        if len(word) < fuzzy.MIN_LENGTH:
+            continue
+        for keyword, label in keyword_label.items():
+            score = fuzzy.similarity(word, keyword)
+            if score > best_score:
+                best_label, best_score = label, score
+    return best_label
+
+
 def detect_category(text: str, kind: str) -> str:
     """دسته‌ی مناسب را بر اساس متن و نوع تراکنش برمی‌گرداند."""
     haystack = (text or "").replace("‌", " ")
@@ -57,4 +84,7 @@ def detect_category(text: str, kind: str) -> str:
         for kw in keywords:
             if kw.replace("‌", " ") in haystack:
                 return label
+    near = _fuzzy_category(haystack, table)
+    if near is not None:
+        return near
     return DEFAULT_INCOME if kind == Kind.INCOME else DEFAULT_EXPENSE

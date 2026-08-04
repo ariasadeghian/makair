@@ -25,7 +25,7 @@ from telegram.ext import (
 
 from .. import plans
 from ..core import (
-    categories, group_nlp, industries, invoice_nlp, jalali, money, nlp,
+    categories, fuzzy, group_nlp, industries, invoice_nlp, jalali, money, nlp,
 )
 from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
 from ..pdf.invoice_pdf import (
@@ -977,6 +977,23 @@ def _leading_qty(s: str) -> int | None:
     return None
 
 
+#: کمتر از این، عدد «تعداد» است نه «قیمت».
+_MIN_TYPED_PRICE = 1_000
+
+
+def _typed_price(rest: str, qty: int) -> int | None:
+    """قیمتی که کاربر کنارِ نامِ کالا نوشته — یا ``None`` اگر فقط تعداد بود."""
+    tokens = rest.split()
+    for index, token in enumerate(tokens):  # عددِ تعداد را کنار بگذار، وگرنه
+        if _leading_qty(token) == qty:      # به عددِ قیمت می‌چسبد و جمع می‌شود
+            tokens = tokens[:index] + tokens[index + 1:]
+            break
+    amount = money.parse_amount(" ".join(tokens))
+    if amount is None or amount < _MIN_TYPED_PRICE:
+        return None
+    return amount
+
+
 def _parse_item(text: str, products: dict) -> dict | None:
     """یک قلم فاکتور را از متن می‌سازد.
 
@@ -988,8 +1005,23 @@ def _parse_item(text: str, products: dict) -> dict | None:
         return None
     for name, prod in products.items():  # ۱) تطبیق با کالای ذخیره‌شده
         if name and name in t:
-            qty = _leading_qty(t.replace(name, " ")) or 1
-            return {"title": name, "quantity": qty, "unit_price": int(prod.unit_price)}
+            rest = t.replace(name, " ")
+            qty = _leading_qty(rest) or 1
+            typed = _typed_price(rest, qty)
+            return {
+                "title": name, "quantity": qty,
+                # قیمتی که کاربر صریح نوشته بر قیمتِ ذخیره‌شده مقدم است
+                "unit_price": typed if typed is not None else int(prod.unit_price),
+            }
+    item = _parse_item_free(t)
+    if item is not None:
+        # «مبلمان» وقتی «مبل» در فهرست هست ⇒ همان کالا، نه یک ردیفِ تازه.
+        item["title"] = fuzzy.canonical(item["title"], products.keys())
+    return item
+
+
+def _parse_item_free(t: str) -> dict | None:
+    """قالب‌های آزاد (بدون نگاه به کالاهای ذخیره‌شده)."""
     parts = [p.strip() for p in _ITEM_SPLIT.split(t) if p.strip()]  # ۲) قالب ×
     if len(parts) >= 3:
         qty = money.parse_int(parts[1])
@@ -1179,6 +1211,12 @@ def _parsed_invoice_text(parsed) -> str:
 
 async def _offer_parsed_invoice(update, context, parsed) -> None:
     """پیش‌نویس را نشان می‌دهد؛ تا تأیید نگیرد چیزی ثبت نمی‌شود."""
+    uid = update.effective_user.id
+    with _session(context) as session:
+        known = [p.title for p in products_service.list_products(session, uid)]
+    # نامِ کالا را به شکلِ ذخیره‌شده‌اش برگردان تا «مبلمان» و «مبل» یکی بمانند
+    for item in parsed.items:
+        item.title = fuzzy.canonical(item.title, known)
     context.user_data["invnlp"] = {
         "customer_name": parsed.customer_name,
         "items": parsed.as_items(),
