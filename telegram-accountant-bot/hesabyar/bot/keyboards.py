@@ -209,6 +209,20 @@ def invoice_builder(products, has_items: bool) -> InlineKeyboardMarkup:
     return with_cancel(InlineKeyboardMarkup(rows))
 
 
+def recent_customers_picker(customers) -> InlineKeyboardMarkup:
+    """مشتریانِ اخیر به‌صورت دکمه، زیرِ سؤالِ «نامِ مشتری؟».
+
+    کاربر یا یکی را می‌زند، یا «✍️ اسم جدید»، یا همان‌طور که همیشه بود
+    اسم را تایپ می‌کند — هر سه راه باز است.
+    """
+    rows = [
+        [InlineKeyboardButton(c.name[:40], callback_data=f"cust:pick:{c.id}")]
+        for c in customers
+    ]
+    rows.append([InlineKeyboardButton(texts.BTN_CUSTOMER_NEW, callback_data="cust:new")])
+    return with_cancel(InlineKeyboardMarkup(rows))
+
+
 def invoice_nlp_confirm() -> InlineKeyboardMarkup:
     """تأییدِ فاکتوری که از روی یک جمله‌ی آزاد فهمیده شده.
 

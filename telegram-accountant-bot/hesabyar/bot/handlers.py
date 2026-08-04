@@ -34,6 +34,7 @@ from ..pdf.invoice_pdf import (
     render_statement_image,
 )
 from ..services import backup as backup_service
+from ..services import customers as customers_service
 from ..services import dashboard as dashboard_service
 from ..services import export as export_service
 from ..services import extract as extract_service
@@ -764,12 +765,77 @@ async def on_ledger_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         direction = parts[2]
         context.user_data["flow"] = "ledger_party"
         context.user_data["ledger"] = {"direction": direction}
-        prompt = (
-            texts.LEDGER_ASK_PARTY_RECEIVABLE
-            if direction == Direction.RECEIVABLE
-            else texts.LEDGER_ASK_PARTY_PAYABLE
+        question, markup = _customer_prompt(
+            _store(context), uid, _ledger_party_question(context)
         )
-        await query.edit_message_text(prompt, reply_markup=keyboards.cancel_only())
+        await query.edit_message_text(question, reply_markup=markup)
+
+
+# --- پرسیدنِ نامِ مشتری (با پیشنهادِ مشتریانِ اخیر) --------------------------------
+
+#: جریان‌هایی که منتظرِ نامِ یک طرف‌حساب‌اند.
+_CUSTOMER_FLOWS = ("invoice_customer", "ledger_party")
+
+
+def _customer_prompt(store, uid: int, question: str) -> tuple:
+    """(متنِ سؤال، کیبورد) — با مشتریانِ اخیر اگر وجود داشته باشند."""
+    recent = customers_service.recent_customers(store, uid, limit=4)
+    if not recent:
+        return question, keyboards.cancel_only()
+    return question + texts.CUSTOMER_PICK_HINT, keyboards.recent_customers_picker(recent)
+
+
+def _ledger_party_question(context: ContextTypes.DEFAULT_TYPE) -> str:
+    data = context.user_data.get("ledger") or {}
+    return (
+        texts.LEDGER_ASK_PARTY_RECEIVABLE
+        if data.get("direction") == Direction.RECEIVABLE
+        else texts.LEDGER_ASK_PARTY_PAYABLE
+    )
+
+
+async def on_customer_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های «مشتریان اخیر»: انتخابِ یکی، یا رفتن سراغِ اسمِ جدید."""
+    query = update.callback_query
+    flow = context.user_data.get("flow")
+    if flow not in _CUSTOMER_FLOWS:  # پیامِ کهنه؛ جریان تمام شده است
+        return await query.answer(texts.CUSTOMER_GONE, show_alert=True)
+    action = query.data.split(":")[1]
+
+    if action == "new":
+        await query.answer()
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:  # noqa: BLE001
+            pass
+        question = (
+            texts.INVOICE_ASK_CUSTOMER if flow == "invoice_customer"
+            else _ledger_party_question(context)
+        )
+        return await query.message.reply_text(
+            question, reply_markup=keyboards.cancel_only()
+        )
+
+    try:
+        customer_id = int(query.data.split(":")[2])
+    except (IndexError, ValueError):
+        return await query.answer()
+    uid = update.effective_user.id
+    with _session(context) as session:
+        customer = customers_service.get_customer(session, uid, customer_id)
+    if customer is None:
+        return await query.answer(texts.CUSTOMER_GONE, show_alert=True)
+
+    await query.answer(customer.name)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+    # از همین‌جا جریان مثل حالتی ادامه می‌یابد که کاربر اسم را تایپ کرده بود.
+    shim = _CallbackUpdate(update)
+    if flow == "invoice_customer":
+        return await _handle_invoice_flow(shim, context, customer.name, flow)
+    await _handle_ledger_flow(shim, context, customer.name, flow)
 
 
 _CHEQUE_NO_RE = re.compile(r"[\d۰-۹]{6,}")
@@ -2271,9 +2337,10 @@ async def on_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if action == "newinvoice":
         context.user_data["flow"] = "invoice_customer"
         context.user_data["invoice"] = {"items": [], "discount": 0, "shipping": 0}
-        return await query.message.reply_text(
-            texts.INVOICE_ASK_CUSTOMER, reply_markup=keyboards.cancel_only()
+        question, markup = _customer_prompt(
+            _store(context), update.effective_user.id, texts.INVOICE_ASK_CUSTOMER
         )
+        return await query.message.reply_text(question, reply_markup=markup)
     if action == "plans":
         return await _show_subscription(shim, context)
     if action == "rate":  # از منو فقط نمایش نرخ (ثبت با /rate عدد)
@@ -2571,6 +2638,7 @@ def register(application: Application) -> None:
         CallbackQueryHandler(on_tx_action, pattern=r"^tx:(eamt|ecat|setcat|del):")
     )
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
+    application.add_handler(CallbackQueryHandler(on_customer_pick, pattern=r"^cust:"))
     application.add_handler(CallbackQueryHandler(on_invoice_nlp, pattern=r"^invnlp:"))
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
