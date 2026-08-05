@@ -9,7 +9,7 @@ import datetime as dt
 import secrets
 from typing import Optional, Sequence, TypedDict
 
-from ..core import jalali, money
+from ..core import jalali, seller, money
 from ..db.models import Invoice, InvoiceItem
 from ..db.store import Store
 from . import customers
@@ -69,12 +69,16 @@ async def create_invoice(
             customer_address = customer_address or customer.address
 
     number, seq = next_invoice_number(store, user_id, base)
+    # مشخصاتِ فروشنده همین‌جا فریز می‌شود: فاکتور یک سند است و نباید با
+    # تغییرِ بعدیِ پروفایل عوض شود.
+    owner = store.get("users", user_id)
     invoice = Invoice(
         user_id=user_id, number=number, seq=seq, customer_name=customer_name,
         customer_phone=customer_phone, customer_address=customer_address,
         issue_date=issue_date, note=note,
         discount=int(discount or 0), shipping=int(shipping or 0),
         share_token=new_share_token(), customer_id=customer_id,
+        **seller.snapshot(owner),
     )
     await store.add("invoices", invoice)
     for item in items:

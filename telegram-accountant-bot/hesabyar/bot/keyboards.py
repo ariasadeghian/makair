@@ -8,7 +8,7 @@ from telegram import (
     ReplyKeyboardMarkup,
 )
 
-from ..core import categories, industries
+from ..core import categories, industries, seller
 from ..core.money import format_amount
 from ..plans import PLANS, TIER_ORDER, TIERS, plans_for_tier
 from . import texts
@@ -234,6 +234,35 @@ def daily_summary_actions() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(texts.BTN_FULL_REPORT, callback_data="menu:report")]
     ])
+
+
+def seller_profile(user) -> InlineKeyboardMarkup:
+    """صفحه‌ی سربرگ: هر فیلد یک دکمه، با مقدارِ فعلی‌اش روی خودش.
+
+    ویزارد نیست — کاربر هر وقت خواست هر کدام را می‌زند. مقدارِ روی دکمه
+    یعنی لازم نیست جای دیگری دنبالِ «الان چی ثبت شده؟» بگردد.
+    """
+    rows = []
+    for f in seller.FIELDS:
+        value = seller.value_of(user, f.key) or texts.SELLER_EMPTY_VALUE
+        if len(value) > 22:
+            value = value[:21] + "…"
+        rows.append([InlineKeyboardButton(
+            f"{f.icon} {f.label}: {value}", callback_data=f"seller:set:{f.key}"
+        )])
+    rows.append([InlineKeyboardButton(
+        texts.BTN_SELLER_PREVIEW, callback_data="seller:preview")])
+    rows.append(_back_row())
+    return InlineKeyboardMarkup(rows)
+
+
+def seller_field(field_key: str) -> InlineKeyboardMarkup:
+    """زیرِ سؤالِ یک فیلد: خالی‌کردن، بازگشت به سربرگ، و لغو."""
+    return with_cancel(InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_SELLER_CLEAR,
+                              callback_data=f"seller:clear:{field_key}")],
+        [InlineKeyboardButton(texts.BTN_M_BIZNAME, callback_data="seller:open")],
+    ]))
 
 
 def recent_customers_picker(customers) -> InlineKeyboardMarkup:

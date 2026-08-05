@@ -261,15 +261,17 @@ class TestEveryFlowIsCancellable:
         assert ctx.user_data["flow"] == "ledger_amount"
         assert CANCEL in _cb(msg.markup)
 
-    async def test_business_name(self, store):
+    async def test_seller_field(self, store):
         ctx = _ctx(store)
         await tx.get_or_create_user(store, UID)
-        query = _Query("act:bizname")
-        await handlers.on_menu_action(_update(query=query), ctx)
-        assert ctx.user_data["flow"] == "business_name"
+        # «🏪 سربرگ فاکتور» ⇒ صفحه‌ی فیلدها ⇒ یکی از آن‌ها
+        await handlers.on_menu_action(_update(query=_Query("act:bizname")), ctx)
+        query = _Query("seller:set:business_name")
+        await handlers.on_seller_action(_update(query=query), ctx)
+        assert ctx.user_data["flow"] == "seller_field"
         assert CANCEL in _cb(query.message.markup)
         await _press_cancel(ctx)
-        assert "flow" not in ctx.user_data
+        assert "flow" not in ctx.user_data and "seller_field" not in ctx.user_data
         assert not (await tx.get_or_create_user(store, UID)).business_name
 
     async def test_statement_party(self, store):
@@ -408,7 +410,7 @@ class TestEveryFlowIsCancellable:
 COVERED_FLOWS = {
     "onboarding",
     "ledger_party", "ledger_amount", "ledger_due", "statement_party",
-    "branch_name", "business_name",
+    "branch_name", "seller_field",
     "invoice_customer", "invoice_items", "inv_discount", "inv_shipping",
     "prod_name", "prod_category", "prod_newcat", "prod_price",
     "payment_reference", "edit_amount",

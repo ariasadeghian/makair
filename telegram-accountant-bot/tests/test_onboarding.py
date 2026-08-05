@@ -277,8 +277,12 @@ class TestFillItInLater:
 
         query = _Query("act:bizname")
         await handlers.on_menu_action(_update(query=query), ctx)
-        assert ctx.user_data["flow"] == "business_name"
-        assert query.message.replies[-1]["text"] == texts.BIZNAME_ASK
+        assert texts.SELLER_HEADER in query.message.replies[-1]["text"]
+        assert "seller:set:business_name" in _cb(query.message.replies[-1]["reply_markup"])
+
+        field = _Query("seller:set:business_name")
+        await handlers.on_seller_action(_update(query=field), ctx)
+        assert ctx.user_data["flow"] == "seller_field"
 
         done = await _say(ctx, "قنادی شیرین")
         assert (await tx.get_or_create_user(store, UID)).business_name == "قنادی شیرین"

@@ -26,6 +26,7 @@ from telegram.ext import (
 from .. import plans
 from ..core import (
     categories, fuzzy, group_nlp, industries, invoice_nlp, jalali, money, nlp,
+    seller,
 )
 from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
 from ..pdf.invoice_pdf import (
@@ -122,6 +123,7 @@ def _paywall_text(store, uid: int) -> str:
 #: باید کلیدش را اینجا اضافه کند تا لغو، چیزی از خودش جا نگذارد.
 _FLOW_KEYS = (
     "flow", "ledger", "invoice", "edit_tx", "product_tmp", "payment", "invnlp",
+    "seller_field",
 )
 
 
@@ -535,8 +537,8 @@ async def _route_text(
         return await _handle_statement(update, context, text)
     if flow == "branch_name":
         return await _handle_branch_flow(update, context, text)
-    if flow == "business_name":
-        return await _handle_business_name(update, context, text)
+    if flow == "seller_field":
+        return await _handle_seller_field(update, context, text)
     if flow in ("invoice_customer", "invoice_items", "inv_discount", "inv_shipping"):
         return await _handle_invoice_flow(update, context, text, flow)
     if flow in ("prod_name", "prod_category", "prod_newcat", "prod_price"):
@@ -691,30 +693,109 @@ async def on_industry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+# --- سربرگِ فاکتور -----------------------------------------------------------
+#
+# مشخصاتی که یک‌بار وارد می‌شوند و روی هر فاکتور می‌نشینند. فهرست و
+# اعتبارسنجیِ فیلدها در ``core/seller.py`` است — اینجا فقط رابط کاربری.
+
+
 async def bizname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """تغییرِ نامِ کسب‌وکار — راهِ جبرانِ مرحله‌ی ردشده‌ی ویزارد."""
-    context.user_data["flow"] = "business_name"
-    await update.message.reply_text(
-        texts.BIZNAME_ASK, reply_markup=keyboards.cancel_only()
-    )
-
-
-async def _handle_business_name(update, context, text: str) -> None:
-    name = text.strip()
-    if not name:
-        return await update.message.reply_text(
-            texts.BIZNAME_ASK, reply_markup=keyboards.cancel_only()
-        )
+    """صفحه‌ی «🏪 سربرگ فاکتور»."""
+    _clear_flow(context)
     uid = update.effective_user.id
     with _session(context) as session:
         user = await tx_service.get_or_create_user(session, uid)
-        user.business_name = name[:200]
+        body = texts.SELLER_HEADER
+        if not seller.is_complete_enough(user):
+            body += texts.SELLER_INCOMPLETE
+        markup = keyboards.seller_profile(user)
+    await update.message.reply_text(body, parse_mode="HTML", reply_markup=markup)
+
+
+async def _ask_seller_field(update, context, field) -> None:
+    context.user_data["flow"] = "seller_field"
+    context.user_data["seller_field"] = field.key
+    await update.message.reply_text(
+        texts.SELLER_ASK.format(icon=field.icon, label=field.label, hint=field.hint)
+        + texts.SELLER_ASK_HINT,
+        parse_mode="HTML", reply_markup=keyboards.seller_field(field.key),
+    )
+
+
+async def _save_seller_field(context, uid: int, field_key: str, value: str):
+    """مقدار را روی پروفایل می‌نویسد و کاربرِ به‌روز را برمی‌گرداند."""
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        setattr(user, field_key, value)
         await session.update("users", user)
+        return user
+
+
+async def _handle_seller_field(update, context, text: str) -> None:
+    """مقداری که کاربر برای یکی از خانه‌های سربرگ تایپ کرده."""
+    field = seller.get(context.user_data.get("seller_field", ""))
+    if field is None:
+        _clear_flow(context)
+        return await bizname_cmd(update, context)
+
+    cleaned = field.clean(text)
+    if cleaned is None:
+        return await update.message.reply_text(
+            texts.SELLER_BAD.format(label=field.label, hint=field.hint),
+            parse_mode="HTML", reply_markup=keyboards.seller_field(field.key),
+        )
+    uid = update.effective_user.id
+    user = await _save_seller_field(context, uid, field.key, cleaned)
     _clear_flow(context)
     await update.message.reply_text(
-        texts.BIZNAME_SAVED.format(name=name[:200]),
-        reply_markup=keyboards.main_menu(),
+        texts.SELLER_SAVED.format(label=field.label, value=html.escape(cleaned)),
+        parse_mode="HTML", reply_markup=keyboards.seller_profile(user),
     )
+    await _refresh_summary(context, uid)
+
+
+async def on_seller_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های صفحه‌ی سربرگ: انتخابِ فیلد، خالی‌کردن، و پیش‌نمایش."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    uid = update.effective_user.id
+    shim = _CallbackUpdate(update)
+
+    if action == "open":
+        _clear_flow(context)
+        return await bizname_cmd(shim, context)
+
+    if action == "set":
+        field = seller.get(parts[2] if len(parts) > 2 else "")
+        if field is None:
+            return
+        return await _ask_seller_field(shim, context, field)
+
+    if action == "clear":
+        field = seller.get(parts[2] if len(parts) > 2 else "")
+        if field is None:
+            return
+        user = await _save_seller_field(context, uid, field.key, "")
+        _clear_flow(context)
+        await query.message.reply_text(
+            texts.SELLER_CLEARED.format(label=field.label),
+            reply_markup=keyboards.seller_profile(user),
+        )
+        return await _refresh_summary(context, uid)
+
+    if action == "preview":
+        with _session(context) as session:
+            user = await tx_service.get_or_create_user(session, uid)
+        name = seller.value_of(user, "business_name")
+        if not name:
+            return await query.message.reply_text(texts.SELLER_PREVIEW_EMPTY)
+        block = "\n".join([name, *seller.header_lines(user)])
+        await query.message.reply_text(
+            texts.SELLER_PREVIEW.format(block=html.escape(block)),
+            parse_mode="HTML", reply_markup=keyboards.seller_profile(user),
+        )
     await _refresh_summary(context, uid)
 
 
@@ -2865,6 +2946,7 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_product_category, pattern=r"^pcat:"))
     application.add_handler(CallbackQueryHandler(on_group_confirm, pattern=r"^grp:"))
+    application.add_handler(CallbackQueryHandler(on_seller_action, pattern=r"^seller:"))
     application.add_handler(CallbackQueryHandler(on_industry, pattern=r"^ind:"))
     application.add_handler(
         CallbackQueryHandler(on_onboarding_skip, pattern=r"^onboarding:skip$")

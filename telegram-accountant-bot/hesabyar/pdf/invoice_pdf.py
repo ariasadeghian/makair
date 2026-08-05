@@ -32,7 +32,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from ..core import jalali, money
+from ..core import jalali, money, seller
 
 #: نام فونتی که در reportlab ثبت می‌شود.
 _FONT_NAME = "Vazirmatn"
@@ -174,13 +174,15 @@ def render_invoice_pdf(
 
     story: list = []
 
-    # --- سربرگ: نام کسب‌وکار و تلفن -------------------------------------------
-    business_name = getattr(business, "business_name", None)
+    # --- سربرگ: مشخصاتِ فروشنده ----------------------------------------------
+    # اول از اسنپ‌شاتِ خودِ فاکتور خوانده می‌شود؛ ``business`` فقط برای
+    # فاکتورهای قدیمی است که هنوز اسنپ‌شات ندارند.
+    source = invoice if seller.value_of(invoice, "business_name") else business
+    business_name = seller.value_of(source, "business_name")
     if business_name:
         story.append(_para(business_name, header_style))
-    business_phone = getattr(business, "phone", None)
-    if business_phone:
-        story.append(_para(f"تلفن: {business_phone}", subheader_style))
+    for line in seller.header_lines(source):
+        story.append(_para(line, subheader_style))
     story.append(Spacer(1, 6 * mm))
 
     # --- عنوان فاکتور --------------------------------------------------------
@@ -200,7 +202,9 @@ def render_invoice_pdf(
     story.append(_para(f"مشتری: {customer_name}", normal_style))
     customer_phone = getattr(invoice, "customer_phone", "") or ""
     if customer_phone:
-        story.append(_para(f"تلفن مشتری: {customer_phone}", normal_style))
+        # رقمِ فارسی، هم‌شکلِ بقیه‌ی سند و بدون جابه‌جاییِ دوجهته
+        story.append(_para(
+            f"تلفن مشتری: {money.to_persian_digits(customer_phone)}", normal_style))
     customer_address = getattr(invoice, "customer_address", "") or ""
     if customer_address:
         story.append(_para(f"نشانی: {customer_address}", normal_style))

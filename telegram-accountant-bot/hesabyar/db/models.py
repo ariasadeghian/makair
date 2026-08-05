@@ -103,6 +103,9 @@ class User:
     COLUMNS = (
         "id", "business_name", "phone", "address", "currency", "created_at",
         "business_type", "sheet_id", "onboarded",
+        # سربرگِ فاکتور — فهرست و اعتبارسنجی‌شان در hesabyar/core/seller.py
+        "mobile", "postal_code", "email", "instagram", "website",
+        "economic_code", "national_id",
     )
 
     id: Optional[int] = None
@@ -118,12 +121,23 @@ class User:
     #: ویزاردِ شروع یک‌بار اجرا شده است؟ (حتی اگر کاربر مرحله‌ها را رد کرده
     #: باشد) — تا با هر ``/start`` دوباره نپرسیم.
     onboarded: bool = False
+    #: --- سربرگِ فاکتور: یک‌بار پر می‌شود، روی هر سند می‌نشیند ---
+    mobile: str = ""
+    postal_code: str = ""
+    email: str = ""
+    instagram: str = ""
+    website: str = ""
+    economic_code: str = ""
+    national_id: str = ""
 
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.business_name), _s(self.phone),
             _s(self.address), _s(self.currency), _s(self.created_at),
             _s(self.business_type), _s(self.sheet_id), _s(self.onboarded),
+            _s(self.mobile), _s(self.postal_code), _s(self.email),
+            _s(self.instagram), _s(self.website), _s(self.economic_code),
+            _s(self.national_id),
         ]
 
     @classmethod
@@ -140,6 +154,13 @@ class User:
             # ردیف‌های قدیمی این ستون را ندارند؛ اگر نامِ کسب‌وکار دارند یعنی
             # از قبل راه افتاده‌اند و نباید دوباره ویزارد ببینند.
             onboarded=_pbool(d.get("onboarded")) or bool(d.get("business_name")),
+            mobile=_pstr(d.get("mobile")),
+            postal_code=_pstr(d.get("postal_code")),
+            email=_pstr(d.get("email")),
+            instagram=_pstr(d.get("instagram")),
+            website=_pstr(d.get("website")),
+            economic_code=_pstr(d.get("economic_code")),
+            national_id=_pstr(d.get("national_id")),
         )
 
 
@@ -286,6 +307,10 @@ class Invoice:
         "id", "user_id", "number", "seq", "customer_name", "customer_phone",
         "customer_address", "issue_date", "note", "discount", "shipping",
         "created_at", "share_token", "customer_tg_id", "rating", "customer_id",
+        # اسنپ‌شاتِ فروشنده در لحظه‌ی صدور — سند نباید با تغییرِ پروفایل عوض شود
+        "seller_business_name", "seller_address", "seller_phone", "seller_mobile",
+        "seller_postal_code", "seller_email", "seller_instagram", "seller_website",
+        "seller_economic_code", "seller_national_id",
     )
 
     id: Optional[int] = None
@@ -308,6 +333,17 @@ class Invoice:
     rating: int = 0
     #: لینک به رکورد مشتری (customer_name برای نمایش/سازگاری می‌ماند)
     customer_id: Optional[int] = None
+    #: --- اسنپ‌شاتِ فروشنده: از پروفایل کپی می‌شود و دیگر تغییر نمی‌کند ---
+    seller_business_name: str = ""
+    seller_address: str = ""
+    seller_phone: str = ""
+    seller_mobile: str = ""
+    seller_postal_code: str = ""
+    seller_email: str = ""
+    seller_instagram: str = ""
+    seller_website: str = ""
+    seller_economic_code: str = ""
+    seller_national_id: str = ""
     #: اقلام فاکتور — از جدول invoice_items پر می‌شود (در شیت ذخیره نمی‌شود).
     items: list = field(default_factory=list)
 
@@ -327,6 +363,11 @@ class Invoice:
             _s(self.discount), _s(self.shipping), _s(self.created_at),
             _s(self.share_token), _s(self.customer_tg_id), _s(self.rating),
             _s(self.customer_id),
+            _s(self.seller_business_name), _s(self.seller_address),
+            _s(self.seller_phone), _s(self.seller_mobile),
+            _s(self.seller_postal_code), _s(self.seller_email),
+            _s(self.seller_instagram), _s(self.seller_website),
+            _s(self.seller_economic_code), _s(self.seller_national_id),
         ]
 
     @classmethod
@@ -348,6 +389,16 @@ class Invoice:
             customer_tg_id=_pint(d.get("customer_tg_id")),
             rating=_pint(d.get("rating")) or 0,
             customer_id=_pint(d.get("customer_id")),
+            seller_business_name=_pstr(d.get("seller_business_name")),
+            seller_address=_pstr(d.get("seller_address")),
+            seller_phone=_pstr(d.get("seller_phone")),
+            seller_mobile=_pstr(d.get("seller_mobile")),
+            seller_postal_code=_pstr(d.get("seller_postal_code")),
+            seller_email=_pstr(d.get("seller_email")),
+            seller_instagram=_pstr(d.get("seller_instagram")),
+            seller_website=_pstr(d.get("seller_website")),
+            seller_economic_code=_pstr(d.get("seller_economic_code")),
+            seller_national_id=_pstr(d.get("seller_national_id")),
         )
 
 
