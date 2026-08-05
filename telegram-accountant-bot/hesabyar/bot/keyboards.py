@@ -244,11 +244,21 @@ def seller_profile(user) -> InlineKeyboardMarkup:
     """
     rows = []
     for f in seller.FIELDS:
-        value = seller.value_of(user, f.key) or texts.SELLER_EMPTY_VALUE
+        # ``display`` یعنی کاربر دقیقاً همان چیزی را می‌بیند که چاپ می‌شود
+        # (شماره‌ها با رقمِ فارسی) — نه یک نسخه‌ی دیگر از مقدارِ خودش.
+        value = seller.display(user, f.key) or texts.SELLER_EMPTY_VALUE
         if len(value) > 22:
             value = value[:21] + "…"
         rows.append([InlineKeyboardButton(
             f"{f.icon} {f.label}: {value}", callback_data=f"seller:set:{f.key}"
+        )])
+    # تصویرها مقدارِ خواندنی ندارند (``file_id`` به درد کاربر نمی‌خورد)؛
+    # فقط «هست یا نیست» را نشان می‌دهیم.
+    for f in seller.IMAGE_FIELDS:
+        state = (texts.SELLER_IMAGE_SET if seller.image_of(user, f.key)
+                 else texts.SELLER_EMPTY_VALUE)
+        rows.append([InlineKeyboardButton(
+            f"{f.icon} {f.label}: {state}", callback_data=f"seller:img:{f.key}"
         )])
     rows.append([InlineKeyboardButton(
         texts.BTN_SELLER_PREVIEW, callback_data="seller:preview")])

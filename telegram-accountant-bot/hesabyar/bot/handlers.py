@@ -44,6 +44,7 @@ from ..services import export as export_service
 from ..services import extract as extract_service
 from ..services import gateway as gateway_service
 from ..services import group_ledger as group_service
+from ..services import images as images_service
 from ..services import ingest as ingest_service
 from ..services import invoices as invoice_service
 from ..services import ledger as ledger_service
@@ -542,6 +543,14 @@ async def _route_text(
         return await _handle_branch_flow(update, context, text)
     if flow == "seller_field":
         return await _handle_seller_field(update, context, text)
+    if flow == "seller_image":
+        field = seller.get_image(context.user_data.get("seller_field", ""))
+        return await update.message.reply_text(
+            texts.SELLER_IMAGE_NEED_PHOTO.format(
+                label=field.label if field is not None else "تصویر"),
+            parse_mode="HTML", reply_markup=keyboards.seller_field(
+                field.key if field is not None else ""),
+        )
     if flow in ("invoice_customer", "invoice_items", "inv_discount", "inv_shipping"):
         return await _handle_invoice_flow(update, context, text, flow)
     if flow in ("prod_name", "prod_category", "prod_newcat", "prod_price"):
@@ -757,6 +766,38 @@ async def _handle_seller_field(update, context, text: str) -> None:
     await _refresh_summary(context, uid)
 
 
+async def _ask_seller_image(update, context, field) -> None:
+    """درخواستِ عکسِ لوگو یا مهر — جریانِ جدا، چون ورودی‌اش متن نیست."""
+    context.user_data["flow"] = "seller_image"
+    context.user_data["seller_field"] = field.key
+    await update.message.reply_text(
+        texts.SELLER_IMAGE_ASK.format(
+            icon=field.icon, label=field.label, hint=field.hint),
+        parse_mode="HTML", reply_markup=keyboards.seller_field(field.key),
+    )
+
+
+async def _handle_seller_image(update, context, file_id: str) -> None:
+    """عکسی که کاربر برای لوگو یا مهر فرستاده.
+
+    خودِ عکس ذخیره نمی‌شود؛ فقط ``file_id`` تلگرام — که برای همین بات دائمی
+    است و باینری را از گوگل‌شیت دور نگه می‌دارد.
+    """
+    field = seller.get_image(context.user_data.get("seller_field", ""))
+    if field is None:
+        _clear_flow(context)
+        return await bizname_cmd(update, context)
+
+    uid = update.effective_user.id
+    user = await _save_seller_field(context, uid, field.key, file_id)
+    _clear_flow(context)
+    await update.message.reply_text(
+        texts.SELLER_IMAGE_SAVED.format(label=field.label),
+        reply_markup=keyboards.seller_profile(user),
+    )
+    await _refresh_summary(context, uid)
+
+
 async def on_seller_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """دکمه‌های صفحه‌ی سربرگ: انتخابِ فیلد، خالی‌کردن، و پیش‌نمایش."""
     query = update.callback_query
@@ -776,8 +817,14 @@ async def on_seller_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
         return await _ask_seller_field(shim, context, field)
 
+    if action == "img":
+        field = seller.get_image(parts[2] if len(parts) > 2 else "")
+        if field is None:
+            return
+        return await _ask_seller_image(shim, context, field)
+
     if action == "clear":
-        field = seller.get(parts[2] if len(parts) > 2 else "")
+        field = seller.any_field(parts[2] if len(parts) > 2 else "")
         if field is None:
             return
         user = await _save_seller_field(context, uid, field.key, "")
@@ -1479,6 +1526,7 @@ async def _preview_invoice(update, context) -> None:
         render_invoice_image(
             draft, user, path, _payment_note(context),
             watermark=_watermark(context, _store(context), uid),
+            **await images_service.seller_images(context.bot, draft),
         )
         with open(path, "rb") as fh:
             await context.bot.send_photo(
@@ -1652,11 +1700,17 @@ async def _send_invoice_files(context, chat_id, invoice, user, caption: str) -> 
         payment_note = f"پرداخت: کارت‌به‌کارت به {settings.card_number}{holder}"
 
     mark = _watermark(context, _store(context), getattr(user, "id", 0) or 0)
+    # لوگو/مهر از اسنپ‌شاتِ خودِ فاکتور می‌آید (نه پروفایلِ فعلی) تا ارسالِ
+    # دوباره‌ی یک فاکتورِ قدیمی همان سندی باشد که مشتری در دست دارد.
+    art = await images_service.seller_images(
+        context.bot, seller.source_for(invoice, user))
     img_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice.id}.png")
     pdf_path = os.path.join(tempfile.gettempdir(), f"invoice_{invoice.id}.pdf")
     try:
-        render_invoice_image(invoice, user, img_path, payment_note, watermark=mark)
-        render_invoice_pdf(invoice, user, pdf_path, payment_note, watermark=mark)
+        render_invoice_image(invoice, user, img_path, payment_note,
+                             watermark=mark, **art)
+        render_invoice_pdf(invoice, user, pdf_path, payment_note,
+                           watermark=mark, **art)
         with open(img_path, "rb") as fh:
             await context.bot.send_photo(
                 chat_id, photo=fh, caption=caption,
@@ -2312,6 +2366,10 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return await _handle_payment_flow(
             update, context, reference="(عکس رسید)", receipt_file_id=file_id
         )
+    if context.user_data.get("flow") == "seller_image":
+        return await _handle_seller_image(
+            update, context, update.message.photo[-1].file_id
+        )
     tg_file = await update.message.photo[-1].get_file()
     image_bytes = bytes(await tg_file.download_as_bytearray())
     await _process_receipt_image(update, context, image_bytes, texts.INGEST_SOURCE_PHOTO)
@@ -2326,6 +2384,16 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     name = (doc.file_name or "").lower()
     is_pdf = "pdf" in mime or name.endswith(".pdf")
     is_image = mime.startswith("image/")
+    # لوگو را معمولاً به‌صورت «فایل» می‌فرستند تا تلگرام فشرده‌اش نکند
+    if context.user_data.get("flow") == "seller_image":
+        if not is_image:
+            field = seller.get_image(context.user_data.get("seller_field", ""))
+            label = field.label if field is not None else "تصویر"
+            return await update.message.reply_text(
+                texts.SELLER_IMAGE_NEED_PHOTO.format(label=label),
+                parse_mode="HTML",
+            )
+        return await _handle_seller_image(update, context, doc.file_id)
     if not (is_pdf or is_image):
         return await update.message.reply_text(texts.INGEST_UNSUPPORTED)
     if context.user_data.get("flow") == "payment_reference":

@@ -144,11 +144,19 @@ def list_invoices(session, user_id, limit=10) -> list[Invoice]
 ### `hesabyar.pdf.invoice_pdf`
 ```python
 def register_font() -> str    # ثبت Vazirmatn، برگرداندن نام فونت
-def render_invoice_pdf(invoice, business, out_path: str) -> str   # مسیر فایل
+def render_invoice_pdf(invoice, business, out_path: str, payment_note="",
+                       watermark="", logo_path="", stamp_path="") -> str
 ```
 - با `reportlab` + `arabic_reshaper` + `python-bidi` متن فارسی راست‌به‌چپ را شکل بده.
 - فونت از `hesabyar/pdf/fonts/Vazirmatn-Regular.ttf` (کنار همین ماژول). اگر نبود، متغیر محیطی `HESABYAR_PDF_FONT`.
 - سربرگ (نام کسب‌وکار/تلفن)، شماره و تاریخ فاکتور، مشخصات مشتری، جدول اقلام (ردیف، شرح، تعداد، قیمت واحد، جمع)، جمع کل.
+- **شکستنِ خطِ متنِ بلند با `_fit_lines`/`_paras`، نه با خودِ reportlab.** چون
+  `shape_fa` متن را به ترتیبِ *دیداری* درمی‌آورد، سپردنِ شکستن به reportlab
+  ابتدای جمله را می‌اندازد خطِ آخر («تلفن:» یک خط پایین‌تر از شماره‌اش).
+  اول بشکن، بعد هر خط را جدا شکل بده.
+- `logo_path`/`stamp_path`: فایلِ روی دیسک؛ خالی یا خراب ⇒ سند بدون تصویر
+  ساخته می‌شود، هرگز خطا نمی‌دهد. مسیرها را
+  `hesabyar.services.images.seller_images(bot, source)` می‌سازد.
 - تست: یک `Invoice` جدا (بدون session) با چند `InvoiceItem` بساز، PDF تولید کن و بررسی کن فایل ساخته شده، با `%PDF` شروع می‌شود و اندازه‌اش > ۱۰۰۰ بایت است.
 
 ## قواعد مشترک

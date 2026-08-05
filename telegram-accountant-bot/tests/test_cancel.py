@@ -274,6 +274,18 @@ class TestEveryFlowIsCancellable:
         assert "flow" not in ctx.user_data and "seller_field" not in ctx.user_data
         assert not (await tx.get_or_create_user(store, UID)).business_name
 
+    async def test_seller_image(self, store):
+        ctx = _ctx(store)
+        await tx.get_or_create_user(store, UID)
+        await handlers.on_menu_action(_update(query=_Query("act:bizname")), ctx)
+        query = _Query("seller:img:logo_file_id")
+        await handlers.on_seller_action(_update(query=query), ctx)
+        assert ctx.user_data["flow"] == "seller_image"
+        assert CANCEL in _cb(query.message.markup)
+        await _press_cancel(ctx)
+        assert "flow" not in ctx.user_data and "seller_field" not in ctx.user_data
+        assert not (await tx.get_or_create_user(store, UID)).logo_file_id
+
     async def test_statement_party(self, store):
         ctx = _ctx(store)
         query = _Query("ledger:statement")
@@ -410,7 +422,7 @@ class TestEveryFlowIsCancellable:
 COVERED_FLOWS = {
     "onboarding",
     "ledger_party", "ledger_amount", "ledger_due", "statement_party",
-    "branch_name", "seller_field",
+    "branch_name", "seller_field", "seller_image",
     "invoice_customer", "invoice_items", "inv_discount", "inv_shipping",
     "prod_name", "prod_category", "prod_newcat", "prod_price",
     "payment_reference", "edit_amount",

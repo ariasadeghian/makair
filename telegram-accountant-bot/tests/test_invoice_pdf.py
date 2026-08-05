@@ -111,3 +111,107 @@ class TestRenderInvoicePdf:
         data = (tmp_path / "invoice_dt.pdf").read_bytes()
         assert data[:4] == b"%PDF"
         assert len(data) > 1000
+
+
+class TestRtlLineWrapping:
+    """شکستنِ خطِ متنِ فارسیِ بلند.
+
+    :func:`invoice_pdf.shape_fa` متن را به ترتیبِ *دیداری* درمی‌آورد؛ اگر
+    شکستنِ خط را به reportlab بسپاریم، آن رشته‌ی از-پیش-وارونه‌شده را مثل
+    متنِ چپ‌به‌راست می‌شکند و ابتدای جمله می‌افتد خطِ آخر — یعنی «تلفن:» یک
+    خط پایین‌تر از شماره‌اش چاپ می‌شود. این کلاس نگهبانِ همان است.
+    """
+
+    def _style(self):
+        from reportlab.lib.styles import ParagraphStyle
+
+        return ParagraphStyle(
+            "T", fontName=invoice_pdf.register_font(), fontSize=11, leading=16)
+
+    def _width(self, text, style):
+        from reportlab.pdfbase import pdfmetrics
+
+        return pdfmetrics.stringWidth(
+            invoice_pdf.shape_fa(text), style.fontName, style.fontSize)
+
+    #: همان سربرگی که با پرشدنِ فیلدهای فاز ۱۵ سرریز می‌کند.
+    CONTACT = ("تلفن: ۰۲۱۸۸۱۲۳۴۵۶ • موبایل: ۰۹۱۲۱۱۱۲۲۳۳ • ایمیل: info@shirin.ir"
+               " • اینستاگرام: @shirin.cake • وب‌سایت: shirin.ir")
+
+    def test_empty_text_is_no_line(self):
+        assert invoice_pdf._fit_lines("", self._style(), 400) == []
+        assert invoice_pdf._fit_lines(None, self._style(), 400) == []
+
+    def test_short_text_stays_on_one_line(self):
+        style = self._style()
+        assert invoice_pdf._fit_lines("تلفن: ۰۲۱۸۸۱۲۳۴۵۶", style, 400) == [
+            "تلفن: ۰۲۱۸۸۱۲۳۴۵۶"]
+
+    def test_long_contact_line_is_split(self):
+        style = self._style()
+        lines = invoice_pdf._fit_lines(self.CONTACT, style, invoice_pdf._TEXT_WIDTH)
+        assert len(lines) > 1
+
+    def test_every_produced_line_actually_fits(self):
+        style = self._style()
+        for line in invoice_pdf._fit_lines(
+                self.CONTACT, style, invoice_pdf._TEXT_WIDTH):
+            assert self._width(line, style) <= invoice_pdf._TEXT_WIDTH
+
+    def test_the_first_token_lands_on_the_first_line(self):
+        """رگرسیونِ اصلی: «تلفن:» نباید بیفتد خطِ آخر."""
+        lines = invoice_pdf._fit_lines(
+            self.CONTACT, self._style(), invoice_pdf._TEXT_WIDTH)
+        assert lines[0].startswith("تلفن: ۰۲۱۸۸۱۲۳۴۵۶")
+
+    def test_a_label_is_never_torn_from_its_value(self):
+        style = self._style()
+        lines = invoice_pdf._fit_lines(self.CONTACT, style, invoice_pdf._TEXT_WIDTH)
+        for line in lines:
+            for chunk in line.split(" • "):
+                assert ": " in chunk, f"تکه‌ی نصفه: {chunk!r}"
+
+    def test_nothing_is_lost_in_the_split(self):
+        style = self._style()
+        lines = invoice_pdf._fit_lines(self.CONTACT, style, invoice_pdf._TEXT_WIDTH)
+        assert " • ".join(lines) == self.CONTACT
+
+    def test_plain_text_wraps_on_spaces(self):
+        style = self._style()
+        address = "نشانی: " + "تهران، خیابان کارگر شمالی، کوچه‌ی دوم، پلاک ۴۵ " * 3
+        lines = invoice_pdf._fit_lines(address, style, invoice_pdf._TEXT_WIDTH)
+        assert len(lines) > 1
+        assert lines[0].startswith("نشانی:")
+        assert " ".join(lines) == " ".join(address.split())
+
+    def test_one_unbreakable_token_is_kept_not_dropped(self):
+        """توکنی که خودش از عرض بلندتر است باید بیاید، نه اینکه گم شود."""
+        style = self._style()
+        giant = "ا" * 400
+        assert invoice_pdf._fit_lines(giant, style, 50) == [giant]
+
+    def test_paras_returns_one_paragraph_per_line(self):
+        style = self._style()
+        lines = invoice_pdf._fit_lines(self.CONTACT, style, invoice_pdf._TEXT_WIDTH)
+        assert len(invoice_pdf._paras(
+            self.CONTACT, style, invoice_pdf._TEXT_WIDTH)) == len(lines)
+
+    def test_text_width_matches_the_page_margins(self):
+        """عرضِ مفید باید با حاشیه‌ی واقعیِ سند بخواند، وگرنه محاسبه دروغ است."""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+
+        assert invoice_pdf._TEXT_WIDTH == A4[0] - 2 * invoice_pdf._MARGIN_MM * mm
+
+    def test_a_crowded_header_still_renders(self, tmp_path):
+        invoice, business = _build_invoice()
+        business.address = "تهران، میدان انقلاب، خیابان کارگر شمالی، پلاک ۴۵"
+        business.postal_code = "1418765432"
+        business.mobile = "09121112233"
+        business.email = "info@shirin.ir"
+        business.instagram = "shirin.cake"
+        business.website = "shirin.ir"
+        business.economic_code = "411111111111"
+        out = tmp_path / "crowded.pdf"
+        invoice_pdf.render_invoice_pdf(invoice, business, str(out))
+        assert out.read_bytes()[:4] == b"%PDF"

@@ -112,15 +112,52 @@ FIELDS: tuple[Field, ...] = (
           _economic),
 )
 
+class ImageField(NamedTuple):
+    """تصویری که روی سند می‌نشیند — با ``file_id`` تلگرام نگه داشته می‌شود.
+
+    گوگل‌شیت جای باینری نیست؛ ``file_id`` برای همان بات دائمی است و موقعِ
+    رندر یک‌بار دانلود و در حافظه کش می‌شود.
+    """
+
+    key: str
+    label: str
+    icon: str
+    hint: str
+
+
+IMAGE_FIELDS: tuple[ImageField, ...] = (
+    ImageField("logo_file_id", "لوگو", "🖼",
+               "عکسِ لوگو را بفرست — بالای فاکتور، وسط‌چین چاپ می‌شود.\n"
+               "پس‌زمینه‌ی شفاف (PNG) بهترین نتیجه را می‌دهد."),
+    ImageField("stamp_file_id", "مهر و امضا", "🖊",
+               "عکسِ مهر یا امضا را بفرست — پایینِ فاکتور، کنارِ جمع کل "
+               "می‌نشیند.\nروی کاغذ سفید عکس بگیر تا تمیز دربیاید."),
+)
+
 #: دسترسی سریع با کلید.
 BY_KEY: dict = {f.key: f for f in FIELDS}
+IMAGE_BY_KEY: dict = {f.key: f for f in IMAGE_FIELDS}
+
+#: همه‌ی کلیدهایی که در اسنپ‌شاتِ فاکتور فریز می‌شوند (متنی + تصویری).
+_ALL_KEYS: tuple[str, ...] = tuple(f.key for f in FIELDS) + tuple(
+    f.key for f in IMAGE_FIELDS)
 
 #: نامِ ستون‌های اسنپ‌شات روی جدول ``invoices``.
-SNAPSHOT_COLUMNS: tuple[str, ...] = tuple(f"seller_{f.key}" for f in FIELDS)
+SNAPSHOT_COLUMNS: tuple[str, ...] = tuple(f"seller_{k}" for k in _ALL_KEYS)
 
 
 def get(field_key: str) -> Optional[Field]:
     return BY_KEY.get(field_key)
+
+
+def get_image(field_key: str) -> Optional[ImageField]:
+    return IMAGE_BY_KEY.get(field_key)
+
+
+def any_field(field_key: str):
+    """فیلد را از هر دو فهرست پیدا می‌کند — برای کارهایی مثل «خالی کن»
+    که فرقی بین متن و تصویر ندارند."""
+    return BY_KEY.get(field_key) or IMAGE_BY_KEY.get(field_key)
 
 
 def value_of(source, field_key: str) -> str:
@@ -134,8 +171,27 @@ def value_of(source, field_key: str) -> str:
 
 
 def snapshot(user) -> dict:
-    """اسنپ‌شاتِ مشخصاتِ فروشنده برای فریزکردن روی فاکتور."""
-    return {f"seller_{f.key}": str(getattr(user, f.key, "") or "") for f in FIELDS}
+    """اسنپ‌شاتِ مشخصاتِ فروشنده برای فریزکردن روی فاکتور.
+
+    لوگو و مهر هم فریز می‌شوند: اگر کسب‌وکار بعداً لوگویش را عوض کند،
+    فاکتورهای قدیمی باید همان لوگویی را داشته باشند که مشتری دیده است.
+    """
+    return {f"seller_{k}": str(getattr(user, k, "") or "") for k in _ALL_KEYS}
+
+
+def image_of(source, field_key: str) -> str:
+    """``file_id`` تصویر از اسنپ‌شاتِ فاکتور یا از پروفایل."""
+    return value_of(source, field_key)
+
+
+def source_for(invoice, business):
+    """کدام‌یک سربرگ را می‌دهد: اسنپ‌شاتِ فاکتور، یا پروفایلِ فعلیِ کاربر.
+
+    قاعده یکی است و باید یک جا بماند: اگر فاکتور اسنپ‌شات دارد، همان حرفِ
+    آخر است. فاکتورهای پیش از اسنپ‌شات (داده‌ی قدیمی) از پروفایل پر می‌شوند
+    تا خالی نمانند.
+    """
+    return invoice if value_of(invoice, "business_name") else business
 
 
 def is_complete_enough(user) -> bool:

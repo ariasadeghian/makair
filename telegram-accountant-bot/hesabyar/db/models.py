@@ -114,6 +114,7 @@ class User:
         # سربرگِ فاکتور — فهرست و اعتبارسنجی‌شان در hesabyar/core/seller.py
         "mobile", "postal_code", "email", "instagram", "website",
         "economic_code", "national_id",
+        "logo_file_id", "stamp_file_id",
     )
 
     id: Optional[int] = None
@@ -137,6 +138,9 @@ class User:
     website: str = ""
     economic_code: str = ""
     national_id: str = ""
+    #: file_idهای تلگرام برای لوگو و مهر/امضا (باینری روی شیت نمی‌رود)
+    logo_file_id: str = ""
+    stamp_file_id: str = ""
 
     def to_row(self) -> list:
         return [
@@ -146,6 +150,7 @@ class User:
             _s(self.mobile), _s(self.postal_code), _s(self.email),
             _s(self.instagram), _s(self.website), _s(self.economic_code),
             _s(self.national_id),
+            _s(self.logo_file_id), _s(self.stamp_file_id),
         ]
 
     @classmethod
@@ -169,6 +174,8 @@ class User:
             website=_pstr(d.get("website")),
             economic_code=_pstr(d.get("economic_code")),
             national_id=_pstr(d.get("national_id")),
+            logo_file_id=_pstr(d.get("logo_file_id")),
+            stamp_file_id=_pstr(d.get("stamp_file_id")),
         )
 
 
@@ -319,6 +326,7 @@ class Invoice:
         "seller_business_name", "seller_address", "seller_phone", "seller_mobile",
         "seller_postal_code", "seller_email", "seller_instagram", "seller_website",
         "seller_economic_code", "seller_national_id",
+        "seller_logo_file_id", "seller_stamp_file_id",
         "status",
     )
 
@@ -353,6 +361,8 @@ class Invoice:
     seller_website: str = ""
     seller_economic_code: str = ""
     seller_national_id: str = ""
+    seller_logo_file_id: str = ""
+    seller_stamp_file_id: str = ""
     #: «issued» یا «void» — باطل‌شده شماره‌اش را نگه می‌دارد ولی سند نیست.
     status: str = InvoiceStatus.ISSUED
     #: اقلام فاکتور — از جدول invoice_items پر می‌شود (در شیت ذخیره نمی‌شود).
@@ -383,6 +393,7 @@ class Invoice:
             _s(self.seller_postal_code), _s(self.seller_email),
             _s(self.seller_instagram), _s(self.seller_website),
             _s(self.seller_economic_code), _s(self.seller_national_id),
+            _s(self.seller_logo_file_id), _s(self.seller_stamp_file_id),
             _s(self.status),
         ]
 
@@ -415,6 +426,8 @@ class Invoice:
             seller_website=_pstr(d.get("seller_website")),
             seller_economic_code=_pstr(d.get("seller_economic_code")),
             seller_national_id=_pstr(d.get("seller_national_id")),
+            seller_logo_file_id=_pstr(d.get("seller_logo_file_id")),
+            seller_stamp_file_id=_pstr(d.get("seller_stamp_file_id")),
             # ردیف‌های قدیمی این ستون را ندارند و همه‌شان معتبرند
             status=_pstr(d.get("status")) or InvoiceStatus.ISSUED,
         )

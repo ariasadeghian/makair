@@ -25,6 +25,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
+    Image,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -122,6 +123,86 @@ def _para(text: str, style: ParagraphStyle) -> Paragraph:
     return Paragraph(shape_fa(text), style)
 
 
+#: حاشیه‌ی سند (میلی‌متر) — هم به ``SimpleDocTemplate`` می‌رود و هم مبنای
+#: محاسبه‌ی عرضِ مفید است، تا این دو هیچ‌وقت از هم دور نیفتند.
+_MARGIN_MM = 18
+#: عرضی که متن واقعاً در آن جا می‌شود.
+_TEXT_WIDTH = A4[0] - 2 * _MARGIN_MM * mm
+
+#: جداکننده‌ی آیتم‌های تماس در سربرگ — نباید وسطش شکسته شود.
+_BULLET = " • "
+
+
+def _fit_lines(text: str, style: ParagraphStyle, max_width: float) -> list[str]:
+    """متنِ *منطقی* را به خط‌هایی می‌شکند که هرکدام در ``max_width`` جا شوند.
+
+    چرا دستی؟ چون :func:`shape_fa` متن را به ترتیبِ *دیداری* درمی‌آورد و
+    reportlab آن رشته‌ی از-پیش-وارونه‌شده را مثل متن چپ‌به‌راست می‌شکند؛
+    نتیجه این می‌شود که ابتدای جمله می‌افتد خطِ آخر — «تلفن:» یک خط پایین‌تر
+    از شماره‌اش. پس اول می‌شکنیم، بعد هر خط را جدا شکل می‌دهیم.
+
+    آیتم‌های تماس (جداشده با «•») واحدِ اتمی‌اند تا برچسب از مقدارش جدا نشود.
+    """
+    text = str(text or "")
+    if not text:
+        return []
+    tokens = text.split(_BULLET) if _BULLET in text else text.split()
+    joiner = _BULLET if _BULLET in text else " "
+
+    def too_wide(candidate: str) -> bool:
+        return pdfmetrics.stringWidth(
+            shape_fa(candidate), style.fontName, style.fontSize) > max_width
+
+    lines: list[str] = []
+    current = ""
+    for token in tokens:
+        candidate = f"{current}{joiner}{token}" if current else token
+        if current and too_wide(candidate):
+            lines.append(current)
+            current = token
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _paras(text: str, style: ParagraphStyle,
+           max_width: float = _TEXT_WIDTH) -> list[Paragraph]:
+    """همان :func:`_para`، ولی متنِ بلند را درست می‌شکند."""
+    return [_para(line, style) for line in _fit_lines(text, style, max_width)]
+
+
+#: بیشترین اندازه‌ی لوگو روی سربرگ (میلی‌متر).
+LOGO_MAX_W, LOGO_MAX_H = 55, 22
+#: بیشترین اندازه‌ی مهر و امضا در پای سند (میلی‌متر).
+STAMP_MAX_W, STAMP_MAX_H = 45, 30
+
+
+def _fitted_image(path: str, max_w_mm: float, max_h_mm: float, align: str = "CENTER"):
+    """تصویر را بدون کش‌آمدن در یک کادر جا می‌دهد؛ ``None`` اگر نشد.
+
+    نسبتِ ابعاد حفظ می‌شود — لوگویی که کشیده شده باشد بدتر از نبودنِ لوگوست.
+    خطا هرگز بالا نمی‌رود: سندِ بی‌لوگو بهتر از سندِ صادرنشده است.
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(path) as img:
+            src_w, src_h = img.size
+        if not src_w or not src_h:
+            return None
+        scale = min(max_w_mm / src_w, max_h_mm / src_h)
+        flowable = Image(path, width=src_w * scale * mm, height=src_h * scale * mm,
+                         mask="auto")
+        flowable.hAlign = align
+        return flowable
+    except Exception:
+        return None
+
+
 def _watermark_para(watermark: str, font_name: str) -> Paragraph:
     """امضای کوچکِ بات برای پای سند (سطح برنزی)."""
     style = ParagraphStyle(
@@ -133,7 +214,7 @@ def _watermark_para(watermark: str, font_name: str) -> Paragraph:
 
 def render_invoice_pdf(
     invoice: Any, business: Any, out_path: str, payment_note: str = "",
-    watermark: str = "",
+    watermark: str = "", logo_path: str = "", stamp_path: str = "",
 ) -> str:
     """یک فاکتور فروش A4 راست‌چین در مسیر ``out_path`` می‌سازد.
 
@@ -145,6 +226,8 @@ def render_invoice_pdf(
         ویژگی‌های اختیاری ``business_name``، ``phone`` و ``address``.
         می‌تواند ``None`` باشد.
     :param out_path: مسیر فایل خروجی PDF.
+    :param logo_path: مسیرِ فایلِ لوگو (بالای سربرگ). خالی یعنی بدون لوگو.
+    :param stamp_path: مسیرِ فایلِ مهر و امضا (پای سند). خالی یعنی بدون مهر.
     :returns: همان ``out_path``.
     """
     font_name = register_font()
@@ -177,12 +260,16 @@ def render_invoice_pdf(
     # --- سربرگ: مشخصاتِ فروشنده ----------------------------------------------
     # اول از اسنپ‌شاتِ خودِ فاکتور خوانده می‌شود؛ ``business`` فقط برای
     # فاکتورهای قدیمی است که هنوز اسنپ‌شات ندارند.
-    source = invoice if seller.value_of(invoice, "business_name") else business
+    source = seller.source_for(invoice, business)
+    logo = _fitted_image(logo_path, LOGO_MAX_W, LOGO_MAX_H)
+    if logo is not None:
+        story.append(logo)
+        story.append(Spacer(1, 3 * mm))
     business_name = seller.value_of(source, "business_name")
     if business_name:
-        story.append(_para(business_name, header_style))
+        story.extend(_paras(business_name, header_style))
     for line in seller.header_lines(source):
-        story.append(_para(line, subheader_style))
+        story.extend(_paras(line, subheader_style))
     story.append(Spacer(1, 6 * mm))
 
     # --- عنوان فاکتور --------------------------------------------------------
@@ -205,7 +292,7 @@ def render_invoice_pdf(
 
     # --- مشخصات مشتری --------------------------------------------------------
     customer_name = getattr(invoice, "customer_name", "") or ""
-    story.append(_para(f"مشتری: {customer_name}", normal_style))
+    story.extend(_paras(f"مشتری: {customer_name}", normal_style))
     customer_phone = getattr(invoice, "customer_phone", "") or ""
     if customer_phone:
         # رقمِ فارسی، هم‌شکلِ بقیه‌ی سند و بدون جابه‌جاییِ دوجهته
@@ -213,7 +300,7 @@ def render_invoice_pdf(
             f"تلفن مشتری: {money.to_persian_digits(customer_phone)}", normal_style))
     customer_address = getattr(invoice, "customer_address", "") or ""
     if customer_address:
-        story.append(_para(f"نشانی: {customer_address}", normal_style))
+        story.extend(_paras(f"نشانی: {customer_address}", normal_style))
     story.append(Spacer(1, 6 * mm))
 
     # --- جدول اقلام ----------------------------------------------------------
@@ -287,13 +374,27 @@ def render_invoice_pdf(
     # --- اطلاعات پرداخت (در صورت وجود) ---------------------------------------
     if payment_note:
         story.append(Spacer(1, 4 * mm))
-        story.append(_para(payment_note, normal_style))
+        story.extend(_paras(payment_note, normal_style))
 
     # --- یادداشت (در صورت وجود) ----------------------------------------------
     note = getattr(invoice, "note", "") or ""
     if note:
         story.append(Spacer(1, 4 * mm))
-        story.append(_para(f"توضیحات: {note}", normal_style))
+        story.extend(_paras(f"توضیحات: {note}", normal_style))
+
+    # --- مهر و امضای فروشنده --------------------------------------------------
+    # در ایران همین تکه است که «رسید» را «سند» می‌کند؛ راست‌چین، پای سند،
+    # با برچسبی که بگوید مالِ کیست.
+    stamp = _fitted_image(stamp_path, STAMP_MAX_W, STAMP_MAX_H, align="RIGHT")
+    if stamp is not None:
+        story.append(Spacer(1, 6 * mm))
+        story.append(stamp)
+        stamp_style = ParagraphStyle(
+            "Stamp", fontName=font_name, fontSize=9, alignment=TA_RIGHT,
+            leading=14, textColor=colors.HexColor("#666666"),
+            rightIndent=(STAMP_MAX_W / 2 - 12) * mm,
+        )
+        story.append(_para("مهر و امضای فروشنده", stamp_style))
 
     # --- امضای بات (سطح برنزی) ------------------------------------------------
     if watermark:
@@ -304,10 +405,10 @@ def render_invoice_pdf(
     doc = SimpleDocTemplate(
         out_path,
         pagesize=A4,
-        rightMargin=18 * mm,
-        leftMargin=18 * mm,
-        topMargin=18 * mm,
-        bottomMargin=18 * mm,
+        rightMargin=_MARGIN_MM * mm,
+        leftMargin=_MARGIN_MM * mm,
+        topMargin=_MARGIN_MM * mm,
+        bottomMargin=_MARGIN_MM * mm,
         title="فاکتور فروش",
     )
     doc.build(story)
@@ -321,6 +422,8 @@ def render_invoice_image(
     payment_note: str = "",
     dpi: int = 150,
     watermark: str = "",
+    logo_path: str = "",
+    stamp_path: str = "",
 ) -> str:
     """فاکتور را به‌صورت تصویر PNG می‌سازد (برای فوروارد آسان در پیام‌رسان‌ها).
 
@@ -334,7 +437,8 @@ def render_invoice_image(
     fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
     try:
-        render_invoice_pdf(invoice, business, tmp_pdf, payment_note, watermark)
+        render_invoice_pdf(invoice, business, tmp_pdf, payment_note, watermark,
+                           logo_path=logo_path, stamp_path=stamp_path)
         with fitz.open(tmp_pdf) as doc:
             doc[0].get_pixmap(dpi=dpi).save(out_path)
     finally:
