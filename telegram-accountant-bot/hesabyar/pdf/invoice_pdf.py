@@ -187,6 +187,12 @@ def render_invoice_pdf(
 
     # --- عنوان فاکتور --------------------------------------------------------
     story.append(_para("فاکتور فروش", title_style))
+    if getattr(invoice, "is_void", False):
+        void_style = ParagraphStyle(
+            "Void", fontName=bold_name, fontSize=14, alignment=TA_CENTER,
+            leading=22, textColor=colors.HexColor("#A33B30"),
+        )
+        story.append(_para("این فاکتور باطل شده است", void_style))
     story.append(Spacer(1, 4 * mm))
 
     # --- شماره و تاریخ فاکتور -------------------------------------------------

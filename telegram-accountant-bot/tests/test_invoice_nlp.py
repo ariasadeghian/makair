@@ -410,6 +410,7 @@ class TestManualEdit:
         await handlers.on_invoice_nlp(_update(query=_Query("invnlp:edit")), ctx)
         await handlers.on_invoice_action(_update(query=_Query("inv:pop")), ctx)
         await handlers.on_invoice_action(_update(query=_Query("inv:done")), ctx)
+        await handlers.on_invoice_draft(_update(query=_Query("invdraft:issue")), ctx)
         invoice = store.list("invoices")[0]
         items = store.list("invoice_items", lambda i: i.invoice_id == invoice.id)
         assert len(items) == 1

@@ -115,7 +115,9 @@ def customer_totals(store: Store, user_id: int, customer_id: int) -> dict:
     invoices = sorted(
         store.list(
             "invoices",
-            lambda i: i.user_id == user_id and i.customer_id == customer_id,
+            # فاکتورِ باطل‌شده پولی نیست که کسی بدهکار باشد
+            lambda i: (i.user_id == user_id and i.customer_id == customer_id
+                       and not i.is_void),
         ),
         key=lambda i: i.seq,
     )

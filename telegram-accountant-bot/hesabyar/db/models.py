@@ -26,6 +26,14 @@ class Direction:
     ALL = (RECEIVABLE, PAYABLE)
 
 
+class InvoiceStatus:
+    """فاکتور حذف نمی‌شود، باطل می‌شود — تا پیوستگیِ شماره‌ها نشکند."""
+
+    ISSUED = "issued"
+    VOID = "void"
+    ALL = (ISSUED, VOID)
+
+
 class Instrument:
     CASH = "cash"      # نقدی/معمولی
     CHEQUE = "cheque"  # چک (سررسیدِ پاس‌شدن مهم است)
@@ -311,6 +319,7 @@ class Invoice:
         "seller_business_name", "seller_address", "seller_phone", "seller_mobile",
         "seller_postal_code", "seller_email", "seller_instagram", "seller_website",
         "seller_economic_code", "seller_national_id",
+        "status",
     )
 
     id: Optional[int] = None
@@ -344,8 +353,14 @@ class Invoice:
     seller_website: str = ""
     seller_economic_code: str = ""
     seller_national_id: str = ""
+    #: «issued» یا «void» — باطل‌شده شماره‌اش را نگه می‌دارد ولی سند نیست.
+    status: str = InvoiceStatus.ISSUED
     #: اقلام فاکتور — از جدول invoice_items پر می‌شود (در شیت ذخیره نمی‌شود).
     items: list = field(default_factory=list)
+
+    @property
+    def is_void(self) -> bool:
+        return self.status == InvoiceStatus.VOID
 
     @property
     def subtotal(self) -> int:
@@ -368,6 +383,7 @@ class Invoice:
             _s(self.seller_postal_code), _s(self.seller_email),
             _s(self.seller_instagram), _s(self.seller_website),
             _s(self.seller_economic_code), _s(self.seller_national_id),
+            _s(self.status),
         ]
 
     @classmethod
@@ -399,6 +415,8 @@ class Invoice:
             seller_website=_pstr(d.get("seller_website")),
             seller_economic_code=_pstr(d.get("seller_economic_code")),
             seller_national_id=_pstr(d.get("seller_national_id")),
+            # ردیف‌های قدیمی این ستون را ندارند و همه‌شان معتبرند
+            status=_pstr(d.get("status")) or InvoiceStatus.ISSUED,
         )
 
 

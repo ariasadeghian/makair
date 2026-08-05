@@ -276,6 +276,31 @@ BTN_INVNLP_CONFIRM = "✅ ثبت کن"
 BTN_INVNLP_EDIT = "✏️ ویرایش دستی"
 BTN_INVNLP_CANCEL = "❌ لغو"
 
+# پیش‌نمایش قبل از صدور — تا شماره‌ی فاکتور بی‌خود نسوزد
+INVOICE_DRAFT_NUMBER = "پیش‌نویس"
+INVOICE_PREVIEW_BUILDING = "دارم پیش‌نویس را می‌سازم… ⏳"
+INVOICE_PREVIEW_CAPTION = (
+    "👁 <b>این دقیقاً همان چیزی است که صادر می‌شود.</b>\n"
+    "یک نگاه بینداز — هنوز چیزی ثبت نشده و شماره‌ای نگرفته."
+)
+INVOICE_PREVIEW_GONE = "این پیش‌نویس منقضی شده؛ دوباره «➕ فاکتور جدید» را بزن."
+INVOICE_EDIT_AGAIN = "باشد — اقلام را کم/زیاد کن و دوباره «✅ صدور فاکتور» را بزن."
+BTN_INVOICE_ISSUE = "✅ تأیید و صدور"
+BTN_INVOICE_EDIT = "✏️ اصلاح"
+
+# باطل‌کردن فاکتور
+BTN_INVOICE_VOID = "🚫"
+BTN_INVOICE_VOID_YES = "🚫 بله، باطل کن"
+BTN_INVOICE_VOID_NO = "↩️ بی‌خیال"
+INVOICE_VOID_ASK = (
+    "🚫 فاکتور <b>{number}</b> ({customer}) باطل شود؟\n\n"
+    "شماره‌اش سرِ جایش می‌ماند و از بین نمی‌رود، ولی روی سند «باطل شد» "
+    "می‌خورد و در حسابِ مشتری به حساب نمی‌آید."
+)
+INVOICE_VOID_DONE = "🚫 فاکتور {number} باطل شد."
+INVOICE_VOID_GONE = "این فاکتور پیدا نشد یا از قبل باطل شده است."
+INVOICE_VOID_LABEL = "باطل"
+
 INVOICE_ASK_DISCOUNT = "مبلغ تخفیف را بنویسید (یا «۰»):"
 INVOICE_ASK_SHIPPING = "هزینه‌ی ارسال را بنویسید (یا «۰»):"
 INVOICE_EXTRA_DONE = "اعمال شد ✅"

@@ -335,15 +335,43 @@ def ledger_settle_list(entries) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(rows) if rows else None
 
 
+def invoice_preview() -> InlineKeyboardMarkup:
+    """زیرِ پیش‌نمایش: تا تأیید نزند، شماره‌ای نمی‌سوزد."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_INVOICE_ISSUE, callback_data="invdraft:issue")],
+        [InlineKeyboardButton(texts.BTN_INVOICE_EDIT, callback_data="invdraft:edit")],
+        [InlineKeyboardButton(texts.BTN_FLOW_CANCEL, callback_data=CANCEL_DATA)],
+    ])
+
+
+def invoice_void_confirm(invoice_id: int) -> InlineKeyboardMarkup:
+    """باطل‌کردن برگشت‌ناپذیر است؛ یک‌بار پرسیده می‌شود."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_INVOICE_VOID_YES,
+                             callback_data=f"invvoid:yes:{invoice_id}"),
+        InlineKeyboardButton(texts.BTN_INVOICE_VOID_NO, callback_data="act:invoices"),
+    ]])
+
+
 def invoice_history(invoices) -> InlineKeyboardMarkup | None:
-    """فهرست فاکتورهای اخیر؛ لمسِ هر کدام = ارسال دوباره‌ی عکس و PDF."""
+    """فهرست فاکتورهای اخیر: لمس = ارسال دوباره، 🚫 = باطل‌کردن.
+
+    فاکتورِ باطل‌شده هم می‌ماند (شماره‌اش نباید گم شود) ولی نشان‌دار است و
+    دیگر دکمه‌ی باطل ندارد.
+    """
     rows: list = []
     for inv in list(invoices)[:10]:
-        label = (
-            f"🧾 {inv.number} — {inv.customer_name} — "
-            f"{format_amount(inv.total, with_currency=False)}"
-        )
-        rows.append([InlineKeyboardButton(label, callback_data=f"invh:{inv.id}")])
+        money_part = format_amount(inv.total, with_currency=False)
+        if getattr(inv, "is_void", False):
+            label = f"⛔ {inv.number} — {inv.customer_name} ({texts.INVOICE_VOID_LABEL})"
+            rows.append([InlineKeyboardButton(label, callback_data=f"invh:{inv.id}")])
+            continue
+        label = f"🧾 {inv.number} — {inv.customer_name} — {money_part}"
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"invh:{inv.id}"),
+            InlineKeyboardButton(texts.BTN_INVOICE_VOID,
+                                 callback_data=f"invvoid:ask:{inv.id}"),
+        ])
     return InlineKeyboardMarkup(rows) if rows else None
 
 

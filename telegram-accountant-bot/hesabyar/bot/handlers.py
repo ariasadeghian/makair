@@ -28,7 +28,10 @@ from ..core import (
     categories, fuzzy, group_nlp, industries, invoice_nlp, jalali, money, nlp,
     seller,
 )
-from ..db.models import Direction, GroupEventKind, Instrument, Kind, PaymentStatus
+from ..db.models import (
+    Direction, GroupEventKind, Instrument, Invoice, InvoiceItem, Kind,
+    PaymentStatus,
+)
 from ..pdf.invoice_pdf import (
     render_invoice_image,
     render_invoice_pdf,
@@ -1355,7 +1358,7 @@ async def on_invoice_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if action == "done":
         await query.answer()
-        return await _finalize_invoice(update, context)
+        return await _preview_invoice(update, context)
 
 
 # --- فاکتور از روی یک جمله‌ی آزاد ------------------------------------------------
@@ -1440,6 +1443,159 @@ async def on_invoice_nlp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         inv["msg_id"] = getattr(sent, "message_id", None)
         inv["chat_id"] = getattr(sent, "chat_id", update.effective_chat.id)
+
+
+async def _preview_invoice(update, context) -> None:
+    """پیش‌نمایشِ فاکتور، *پیش از* ساختنِ رکورد.
+
+    تا کاربر تأیید نکند نه شماره‌ای می‌سوزد نه رکوردی ساخته می‌شود — یعنی
+    فاکتورِ اشتباه اصلاً به‌وجود نمی‌آید که بخواهد باطل شود.
+    """
+    inv = context.user_data.get("invoice") or {}
+    items = inv.get("items", [])
+    chat_id = update.effective_chat.id
+    uid = update.effective_user.id
+    if not items:
+        return await context.bot.send_message(
+            chat_id, texts.INVOICE_NO_ITEMS, reply_markup=keyboards.main_menu()
+        )
+
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        await sub_service.get_or_create_subscription(session, uid)
+        active = sub_service.is_active(session, uid)
+        session.commit()
+    if not active:
+        _clear_flow(context)
+        return await context.bot.send_message(
+            chat_id, _paywall_text(_store(context), uid),
+            reply_markup=keyboards.subscription_plans(),
+        )
+
+    await context.bot.send_message(chat_id, texts.INVOICE_PREVIEW_BUILDING)
+    draft = _draft_invoice(inv, user)
+    path = os.path.join(tempfile.gettempdir(), f"draft_{uid}.png")
+    try:
+        render_invoice_image(
+            draft, user, path, _payment_note(context),
+            watermark=_watermark(context, _store(context), uid),
+        )
+        with open(path, "rb") as fh:
+            await context.bot.send_photo(
+                chat_id, photo=fh, caption=texts.INVOICE_PREVIEW_CAPTION,
+                parse_mode="HTML", reply_markup=keyboards.invoice_preview(),
+            )
+    finally:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _draft_invoice(inv: dict, user):
+    """یک فاکتورِ موقت فقط برای رندرِ پیش‌نمایش — هرگز ذخیره نمی‌شود."""
+    draft = Invoice(
+        user_id=getattr(user, "id", 0) or 0,
+        number=texts.INVOICE_DRAFT_NUMBER,
+        customer_name=inv.get("customer_name", "مشتری"),
+        issue_date=jalali.now().date(),
+        discount=int(inv.get("discount", 0)),
+        shipping=int(inv.get("shipping", 0)),
+        **seller.snapshot(user),
+    )
+    draft.items = [
+        InvoiceItem(title=item["title"], quantity=int(item["quantity"]),
+                    unit_price=int(item["unit_price"]))
+        for item in inv.get("items", [])
+    ]
+    return draft
+
+
+def _payment_note(context) -> str:
+    settings = context.application.bot_data["settings"]
+    if not settings.card_number:
+        return ""
+    holder = f" به نام {settings.card_holder}" if settings.card_holder else ""
+    return f"پرداخت: کارت‌به‌کارت به {settings.card_number}{holder}"
+
+
+async def on_invoice_draft(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های زیرِ پیش‌نمایش: تأیید و صدور، یا برگشت به اصلاح."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":", 1)[1]
+    inv = context.user_data.get("invoice")
+    if not inv:
+        return await _safe_edit(query, texts.INVOICE_PREVIEW_GONE)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+
+    if action == "edit":
+        context.user_data["flow"] = "invoice_items"
+        await query.message.reply_text(texts.INVOICE_EDIT_AGAIN)
+        uid = update.effective_user.id
+        with _session(context) as session:
+            products = products_service.list_products(session, uid)
+        sent = await query.message.reply_text(
+            _builder_text(inv), parse_mode="HTML",
+            reply_markup=keyboards.invoice_builder(products, bool(inv.get("items"))),
+        )
+        inv["msg_id"] = getattr(sent, "message_id", None)
+        inv["chat_id"] = getattr(sent, "chat_id", update.effective_chat.id)
+        return
+
+    if action == "issue":
+        # دو بار زدن نباید دو فاکتور بسازد
+        if inv.pop("issuing", False):
+            return
+        inv["issuing"] = True
+        await _finalize_invoice(_CallbackUpdate(update), context)
+
+
+# --- باطل‌کردن فاکتور ------------------------------------------------------------
+
+
+async def on_invoice_void(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """🚫 در تاریخچه: پرسیدن و بعد باطل‌کردن."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    try:
+        invoice_id = int(parts[2])
+    except (IndexError, ValueError):
+        return
+    uid = update.effective_user.id
+
+    if action == "ask":
+        with _session(context) as session:
+            invoice = invoice_service.get_invoice(session, invoice_id, uid)
+        if invoice is None or invoice.is_void:
+            return await _safe_edit(query, texts.INVOICE_VOID_GONE)
+        return await _safe_edit_html(
+            query,
+            texts.INVOICE_VOID_ASK.format(
+                number=invoice.number, customer=html.escape(invoice.customer_name)
+            ),
+            reply_markup=keyboards.invoice_void_confirm(invoice_id),
+        )
+
+    if action == "yes":
+        with _session(context) as session:
+            invoice = await invoice_service.void_invoice(session, invoice_id, uid)
+            if invoice is not None:
+                await session.flush()  # سندِ مالی، فوری روی شیت
+            invoices = invoice_service.list_invoices(session, uid, limit=10)
+        if invoice is None:
+            return await _safe_edit(query, texts.INVOICE_VOID_GONE)
+        await _safe_edit(query, texts.INVOICE_VOID_DONE.format(number=invoice.number))
+        await query.message.reply_text(
+            texts.INVOICE_LIST_HEADER,
+            reply_markup=keyboards.invoice_history(invoices),
+        )
 
 
 async def _finalize_invoice(update, context) -> None:
@@ -2942,6 +3098,8 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
     application.add_handler(CallbackQueryHandler(on_customer_pick, pattern=r"^cust:"))
     application.add_handler(CallbackQueryHandler(on_invoice_nlp, pattern=r"^invnlp:"))
+    application.add_handler(CallbackQueryHandler(on_invoice_draft, pattern=r"^invdraft:"))
+    application.add_handler(CallbackQueryHandler(on_invoice_void, pattern=r"^invvoid:"))
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_product_category, pattern=r"^pcat:"))

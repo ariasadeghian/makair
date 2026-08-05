@@ -10,7 +10,7 @@ import secrets
 from typing import Optional, Sequence, TypedDict
 
 from ..core import jalali, seller, money
-from ..db.models import Invoice, InvoiceItem
+from ..db.models import Invoice, InvoiceItem, InvoiceStatus
 from ..db.store import Store
 from . import customers
 from .transactions import get_or_create_user
@@ -88,6 +88,22 @@ async def create_invoice(
         )
         await store.add("invoice_items", row)
         invoice.items.append(row)
+    return invoice
+
+
+async def void_invoice(
+    store: Store, invoice_id: int, user_id: int
+) -> Optional[Invoice]:
+    """فاکتور را باطل می‌کند — حذف نمی‌شود.
+
+    شماره سرِ جایش می‌ماند تا پیوستگیِ شماره‌گذاری نشکند (کاری که حسابداری
+    واقعی می‌کند). فاکتورِ از قبل باطل‌شده ``None`` برمی‌گرداند.
+    """
+    invoice = get_invoice(store, invoice_id, user_id)
+    if invoice is None or invoice.is_void:
+        return None
+    invoice.status = InvoiceStatus.VOID
+    await store.update("invoices", invoice)
     return invoice
 
 

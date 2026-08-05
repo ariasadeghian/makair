@@ -235,6 +235,7 @@ class TestPickingShortensTheFlow:
         msg = _Msg("صندلی ۱ ۵۰۰ هزار")
         await handlers.on_text(_update(message=msg), ctx)
         await handlers.on_invoice_action(_update(query=_Query("inv:done")), ctx)
+        await handlers.on_invoice_draft(_update(query=_Query("invdraft:issue")), ctx)
 
         assert len(store.list("customers")) == 1, "مشتری تکراری ساخته شد"
         assert store.list("invoices")[0].customer_id == reza.id
