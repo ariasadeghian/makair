@@ -288,6 +288,19 @@ BTN_INVNLP_CONFIRM = "✅ ثبت کن"
 BTN_INVNLP_EDIT = "✏️ ویرایش دستی"
 BTN_INVNLP_CANCEL = "❌ لغو"
 
+# طلب/بدهی از روی یک جمله‌ی آزاد — همیشه قبل از ثبت تأیید گرفته می‌شود؛
+# جمله‌ی «به رضا بدهکارم» تراکنش نیست، وعده‌ی پرداخت است.
+LEDNLP_HEADER_RECEIVABLE = "🟢 طلب شناسایی شد: 👇"
+LEDNLP_HEADER_PAYABLE = "🔴 بدهی شناسایی شد: 👇"
+LEDNLP_PARTY_RECEIVABLE = "طلب از: <b>{name}</b>"
+LEDNLP_PARTY_PAYABLE = "بدهی به: <b>{name}</b>"
+LEDNLP_AMOUNT = "مبلغ: <b>{amount}</b>"
+LEDNLP_ASK = "\n\nبه دفترِ طلب و بدهی اضافه کنم؟"
+LEDNLP_GONE = "این پیش‌نویس منقضی شده؛ دوباره بنویسید یا از «📒 طلب و بدهی» ثبت کنید."
+BTN_LEDNLP_CONFIRM = "✅ ثبت کن"
+BTN_LEDNLP_EDIT = "✏️ ویرایش دستی"
+BTN_LEDNLP_CANCEL = "❌ لغو"
+
 # پیش‌نمایش قبل از صدور — تا شماره‌ی فاکتور بی‌خود نسوزد
 INVOICE_DRAFT_NUMBER = "پیش‌نویس"
 INVOICE_PREVIEW_BUILDING = "دارم پیش‌نویس را می‌سازم… ⏳"

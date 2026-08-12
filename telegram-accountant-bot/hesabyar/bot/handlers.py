@@ -25,8 +25,8 @@ from telegram.ext import (
 
 from .. import plans
 from ..core import (
-    categories, fuzzy, group_nlp, industries, invoice_nlp, jalali, money, nlp,
-    seller,
+    categories, fuzzy, group_nlp, industries, invoice_nlp, jalali, ledger_nlp,
+    money, nlp, seller,
 )
 from ..db.models import (
     Direction, GroupEventKind, Instrument, Invoice, InvoiceItem, Kind,
@@ -127,7 +127,7 @@ def _paywall_text(store, uid: int) -> str:
 #: باید کلیدش را اینجا اضافه کند تا لغو، چیزی از خودش جا نگذارد.
 _FLOW_KEYS = (
     "flow", "ledger", "invoice", "edit_tx", "product_tmp", "payment", "invnlp",
-    "seller_field",
+    "lednlp", "seller_field",
 )
 
 
@@ -581,6 +581,14 @@ async def _route_text(
         return await help_cmd(update, context)
     if text == texts.BTN_CANCEL:
         return await cancel(update, context)
+
+    # «من ۲ میلیون به رضا بدهکارم» ⇒ این یک تراکنش نیست، یک وعده‌ی پرداخت
+    # است؛ باید پیش از هر پردازشِ دیگری (و قطعاً پیش از ثبتِ تراکنشِ عادی)
+    # به دفترِ طلب و بدهی برود، وگرنه به‌عنوان هزینه‌ی «متفرقه» گم می‌شود.
+    if ledger_nlp.looks_like_ledger(text):
+        parsed_ledger = ledger_nlp.parse_ledger_text(text)
+        if parsed_ledger is not None:
+            return await _offer_parsed_ledger(update, context, parsed_ledger)
 
     # لینک فاکتور؟ (وقتی پیام لینک دارد و مبلغی داخلش نیست)
     url = ingest_service.find_url(text)
@@ -1490,6 +1498,77 @@ async def on_invoice_nlp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         inv["msg_id"] = getattr(sent, "message_id", None)
         inv["chat_id"] = getattr(sent, "chat_id", update.effective_chat.id)
+
+
+# --- طلب/بدهی از روی یک جمله‌ی آزاد -----------------------------------------------
+
+
+def _parsed_ledger_text(parsed) -> str:
+    """خلاصه‌ی چیزی که از جمله فهمیده شد، برای تأییدِ کاربر."""
+    is_receivable = parsed.direction == Direction.RECEIVABLE
+    header = texts.LEDNLP_HEADER_RECEIVABLE if is_receivable else texts.LEDNLP_HEADER_PAYABLE
+    party_line = (
+        texts.LEDNLP_PARTY_RECEIVABLE if is_receivable else texts.LEDNLP_PARTY_PAYABLE
+    ).format(name=html.escape(parsed.party_name))
+    amount_line = texts.LEDNLP_AMOUNT.format(amount=money.format_amount(parsed.amount))
+    return f"{header}\n{party_line}\n{amount_line}{texts.LEDNLP_ASK}"
+
+
+async def _offer_parsed_ledger(update, context, parsed) -> None:
+    """پیش‌نویسِ طلب/بدهی را نشان می‌دهد؛ تا تأیید نگیرد چیزی ثبت نمی‌شود.
+
+    همان قرارداد فاکتور: نه شماره‌ای می‌سوزد نه رکوردی ساخته می‌شود — اینجا
+    یعنی جهتِ اشتباه (طلب/بدهیِ برعکس) هرگز فرصتِ ثبت‌شدن پیدا نمی‌کند.
+    """
+    context.user_data["lednlp"] = {
+        "direction": parsed.direction,
+        "party_name": parsed.party_name,
+        "amount": parsed.amount,
+    }
+    await update.message.reply_text(
+        _parsed_ledger_text(parsed), parse_mode="HTML",
+        reply_markup=keyboards.ledger_nlp_confirm(),
+    )
+
+
+async def on_ledger_nlp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های پیش‌نویسِ طلب/بدهی: «ثبت کن» و «ویرایش دستی»."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":", 1)[1]
+    draft = context.user_data.get("lednlp")
+    if not draft:
+        return await _safe_edit(query, texts.LEDNLP_GONE)
+
+    if action == "confirm":
+        # از همینجا به مرحله‌ی «سررسید» همان جریانِ دستی می‌رویم — کدِ ثبت
+        # (لینک‌کردن به مشتری، نوشتن روی شیت، پیام موفقیت) یکی و دست‌نخورده
+        # می‌ماند؛ اینجا فقط طرف‌حساب/مبلغ را از پیش پر می‌کنیم.
+        context.user_data["ledger"] = dict(draft)
+        context.user_data.pop("lednlp", None)
+        context.user_data["flow"] = "ledger_due"
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:  # noqa: BLE001 - نبودِ ویرایش، ادامه‌ی جریان را نمی‌شکند
+            pass
+        return await query.message.reply_text(
+            texts.LEDGER_ASK_DUE, reply_markup=keyboards.cancel_only()
+        )
+
+    if action == "edit":
+        # جهت را نگه می‌داریم (همان دکمه‌ای که می‌زد: طلبکارم/بدهکارم)، ولی
+        # نام و مبلغ را دوباره از خودِ کاربر می‌پرسیم — دقیقاً جریانِ دستی.
+        context.user_data["ledger"] = {"direction": draft.get("direction")}
+        context.user_data.pop("lednlp", None)
+        context.user_data["flow"] = "ledger_party"
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:  # noqa: BLE001
+            pass
+        question, markup = _customer_prompt(
+            _store(context), update.effective_user.id, _ledger_party_question(context)
+        )
+        await query.message.reply_text(question, reply_markup=markup)
 
 
 async def _preview_invoice(update, context) -> None:
@@ -3166,6 +3245,7 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_moadian, pattern=r"^moadian:"))
     application.add_handler(CallbackQueryHandler(on_customer_pick, pattern=r"^cust:"))
     application.add_handler(CallbackQueryHandler(on_invoice_nlp, pattern=r"^invnlp:"))
+    application.add_handler(CallbackQueryHandler(on_ledger_nlp, pattern=r"^lednlp:"))
     application.add_handler(CallbackQueryHandler(on_invoice_draft, pattern=r"^invdraft:"))
     application.add_handler(CallbackQueryHandler(on_invoice_void, pattern=r"^invvoid:"))
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))

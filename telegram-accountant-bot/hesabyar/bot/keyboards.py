@@ -302,6 +302,19 @@ def invoice_nlp_confirm() -> InlineKeyboardMarkup:
     ])
 
 
+def ledger_nlp_confirm() -> InlineKeyboardMarkup:
+    """تأییدِ طلب/بدهی‌ای که از روی یک جمله‌ی آزاد فهمیده شده.
+
+    عمداً هم‌ریختِ ``invoice_nlp_confirm`` است — همان قرارداد: تا کاربر
+    «ثبت کن» را نزند، رکوردی ساخته نمی‌شود.
+    """
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_LEDNLP_CONFIRM, callback_data="lednlp:confirm")],
+        [InlineKeyboardButton(texts.BTN_LEDNLP_EDIT, callback_data="lednlp:edit")],
+        [InlineKeyboardButton(texts.BTN_LEDNLP_CANCEL, callback_data=CANCEL_DATA)],
+    ])
+
+
 def product_list(products) -> InlineKeyboardMarkup:
     """فهرست کالاها؛ هر کالا یک دکمه‌ی حذف، به‌علاوه‌ی افزودن."""
     rows: list = []
