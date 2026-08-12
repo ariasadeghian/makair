@@ -319,7 +319,23 @@ def _parse_item(chunk: str) -> Optional[ParsedInvoiceItem]:
     price_runs = [r for r in scored if _is_price(r)]
     if not price_runs:
         return None
-    price_run = max(price_runs, key=lambda r: r["value"])
+
+    # اگر یک نشانه‌ی شمارش («عدد»، «تا»، «کیلو»، …) در متن هست، عددی که
+    # بلافاصله *بعدِ* آن آمده به‌عنوان قیمت اولویت دارد — نه بزرگ‌ترین عددِ
+    # کل متن. بدونِ این، «کاور آیفون ۱۳ عدد ۲۵۰۰۰۰» یا یک قلمِ دیگر با
+    # عددِ بزرگ‌تر در همان جمله می‌توانست عددِ اشتباهی را به‌عنوانِ قیمتِ
+    # همین قلم بردارد — یعنی قیمت از رویِ عددهای دیگرِ جمله حدس زده می‌شد،
+    # نه از رویِ همان عددی که واقعاً کنارِ نشانه‌ی شمارش نشسته. اگر نشانه‌ای
+    # نبود، رفتارِ قبلی (بزرگ‌ترین عدد) دست‌نخورده می‌ماند.
+    counter_ends = [r["end"] for r in scored if r["after"] in _COUNTERS]
+    anchored = None
+    if counter_ends:
+        anchor = min(counter_ends)
+        after_anchor = [r for r in price_runs if r["start"] > anchor]
+        if after_anchor:
+            anchored = min(after_anchor, key=lambda r: r["start"])
+
+    price_run = anchored if anchored is not None else max(price_runs, key=lambda r: r["value"])
     value = price_run["value"]
     if price_run["currency"] == "rial":  # ریال ⇒ تومان، مثل money.parse_amount
         value /= 10

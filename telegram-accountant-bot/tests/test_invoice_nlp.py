@@ -53,6 +53,139 @@ class TestSpecSamples:
         assert parsed.total == 2_000_000
 
 
+# --- قیمتِ واحد بعد از نشانه‌ی شمارش («عدد») -------------------------------------
+#
+# باگ: عددی که بعد از «عدد» می‌آید باید همیشه قیمت باشد — نه بزرگ‌ترین عددِ
+# جمله. قبل از رفعِ باگ، اگر جمله عددِ بزرگ‌تری در جای دیگری داشت (از یک
+# قلمِ دیگر، یا حتی از خودِ نامِ کالا)، آن عددِ نامربوط به‌جایِ قیمتِ واقعی
+# انتخاب می‌شد. اینجا مستقیماً روی ``_parse_item`` (تکه‌ی خامِ یک قلم) و هم
+# روی ``parse_invoice_text`` (جمله‌ی کامل) تست می‌شود.
+
+
+class TestUnitPriceAfterCounterMarker:
+    #: دو نمونه‌ی دقیقِ گزارش — اینجا رگرسیونِ آن‌ها قفل می‌شود.
+    def test_reported_case_sandali(self):
+        item = invoice_nlp._parse_item("صندلی ۳ عدد ۷۵۰۰۰۰")
+        assert item.title == "صندلی"
+        assert item.quantity == 3
+        assert item.unit_price == 750_000
+        assert item.total == 2_250_000
+
+    def test_reported_case_miz(self):
+        item = invoice_nlp._parse_item("میز ۲ عدد ۳۰۰۰۰۰")
+        assert item.title == "میز"
+        assert item.quantity == 2
+        assert item.unit_price == 300_000
+        assert item.total == 600_000
+
+    # --- ارقامِ فارسی ------------------------------------------------------------
+
+    def test_persian_digits(self):
+        item = invoice_nlp._parse_item("صندلی ۳ عدد ۷۵۰۰۰۰")
+        assert (item.quantity, item.unit_price) == (3, 750_000)
+
+    # --- ارقامِ انگلیسی -----------------------------------------------------------
+
+    def test_english_digits(self):
+        item = invoice_nlp._parse_item("صندلی 3 عدد 750000")
+        assert (item.quantity, item.unit_price) == (3, 750_000)
+
+    def test_mixed_persian_and_english_digits(self):
+        item = invoice_nlp._parse_item("میز 2 عدد ۳۰۰۰۰۰")
+        assert (item.quantity, item.unit_price) == (2, 300_000)
+
+    # --- عددهای با جداکننده --------------------------------------------------------
+
+    def test_thousands_separator_persian_comma(self):
+        item = invoice_nlp._parse_item("صندلی ۳ عدد ۷۵۰٬۰۰۰")
+        assert item.unit_price == 750_000
+
+    def test_thousands_separator_ascii_comma(self):
+        item = invoice_nlp._parse_item("صندلی 3 عدد 750,000")
+        assert item.unit_price == 750_000
+
+    def test_scale_word_after_counter(self):
+        item = invoice_nlp._parse_item("صندلی ۳ عدد ۷۵۰ هزار")
+        assert (item.quantity, item.unit_price) == (3, 750_000)
+
+    def test_toman_word_after_the_price(self):
+        item = invoice_nlp._parse_item("صندلی ۳ عدد ۷۵۰۰۰۰ تومان")
+        assert item.unit_price == 750_000
+
+    # --- چند قلم در یک فاکتور -----------------------------------------------------
+    # قلمِ دومی که عددِ *بزرگ‌تری* دارد نباید قیمتِ قلمِ اول را برباید، و
+    # برعکس — عددِ قلمِ اول نباید روی قلمِ دوم بنشیند.
+
+    def test_two_items_second_price_larger(self):
+        parsed = parse_invoice_text(
+            "فاکتور برای علی، صندلی ۳ عدد ۷۵۰۰۰۰، میز ۲ عدد ۳۰۰۰۰۰۰"
+        )
+        assert parsed is not None
+        assert [(i.title, i.quantity, i.unit_price) for i in parsed.items] == [
+            ("صندلی", 3, 750_000),
+            ("میز", 2, 3_000_000),
+        ]
+
+    def test_two_items_first_price_larger(self):
+        parsed = parse_invoice_text(
+            "فاکتور برای علی، صندلی ۳ عدد ۷۵۰۰۰۰۰، میز ۲ عدد ۳۰۰۰۰۰"
+        )
+        assert parsed is not None
+        assert [(i.title, i.quantity, i.unit_price) for i in parsed.items] == [
+            ("صندلی", 3, 7_500_000),
+            ("میز", 2, 300_000),
+        ]
+
+    def test_three_items_with_the_counter_word(self):
+        parsed = parse_invoice_text(
+            "فاکتور برای کیان، صندلی ۳ عدد ۷۵۰۰۰۰ و میز ۲ عدد ۳۰۰۰۰۰ و "
+            "کمد ۱ عدد ۵۰۰۰۰۰۰"
+        )
+        assert parsed is not None
+        assert [(i.quantity, i.unit_price) for i in parsed.items] == [
+            (3, 750_000), (2, 300_000), (1, 5_000_000),
+        ]
+
+    def test_price_is_not_stolen_by_a_larger_unrelated_number_in_the_text(self):
+        """یک عددِ بزرگ‌ترِ نامربوط جای دیگری در متن نباید قیمت را عوض کند."""
+        item = invoice_nlp._parse_item("صندلی ۳ عدد ۷۵۰۰۰۰ کد انبار ۹۹۹۹۹۹۹")
+        assert item.quantity == 3
+        assert item.unit_price == 750_000
+
+    # --- نامِ کالا حاویِ عدد --------------------------------------------------------
+
+    def test_product_name_with_embedded_number_before_the_item(self):
+        item = invoice_nlp._parse_item("روغن 20W50 عدد ۹۰۰۰۰۰")
+        assert "20" in item.title.upper() or "۲۰" in item.title
+        assert item.unit_price == 900_000
+
+    def test_product_name_with_grade_number(self):
+        """محدوده‌ی این رفع‌باگ فقط قیمت است، نه تعداد/عنوان.
+
+        وقتی عددِ داخلِ نام («درجه ۲») درست کنارِ «عدد» می‌نشیند، هنوز هم —
+        مثل قبل — به‌عنوان تعداد خوانده می‌شود؛ این ابهامِ زبانی‌ای است که
+        تیکت حلش را نخواسته بود. آنچه این رفع‌باگ تضمین می‌کند این است که
+        قیمت، صرف‌نظر از این ابهام، درست بماند و از رویِ عددِ دیگری در متن
+        حدس زده نشود.
+        """
+        item = invoice_nlp._parse_item("مبل درجه ۲ عدد ۲۵۰۰۰۰۰")
+        assert item.unit_price == 2_500_000
+
+    def test_product_model_number_does_not_break_price_selection(self):
+        parsed = parse_invoice_text(
+            "فاکتور برای علی، آیفون ۱۳ عدد ۲۵۰۰۰۰۰۰ و کاور ۲ عدد ۱۵۰۰۰۰"
+        )
+        assert parsed is not None
+        prices = {i.title: i.unit_price for i in parsed.items}
+        assert prices["کاور"] == 150_000
+
+    # --- عددِ نوشتاری کنارِ نشانه‌ی شمارش --------------------------------------------
+
+    def test_word_number_price_after_counter(self):
+        item = invoice_nlp._parse_item("صندلی ۳ عدد هفتصد و پنجاه هزار")
+        assert (item.quantity, item.unit_price) == (3, 750_000)
+
+
 # --- تنوعِ ورودی‌ها -------------------------------------------------------------
 
 
