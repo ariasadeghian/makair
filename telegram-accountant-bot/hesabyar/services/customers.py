@@ -79,6 +79,10 @@ async def find_or_create_customer(
         phone=phone[:50], address=address[:300],
     )
     await store.add("customers", customer)
+    owner = store.get("users", user_id)
+    if owner is not None and owner.first_contact_at is None:
+        owner.first_contact_at = customer.created_at
+        await store.update("users", owner)
     return customer
 
 

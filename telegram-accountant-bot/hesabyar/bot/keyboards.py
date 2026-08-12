@@ -58,6 +58,7 @@ def cancel_only() -> InlineKeyboardMarkup:
 def report_menu() -> InlineKeyboardMarkup:
     """زیرمنوی گزارش و داشبورد."""
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_BUSINESS_SNAPSHOT, callback_data="report:snapshot")],
         [
             InlineKeyboardButton("امروز", callback_data="report:day"),
             InlineKeyboardButton("این هفته", callback_data="report:week"),
@@ -383,18 +384,25 @@ def invoice_history(invoices) -> InlineKeyboardMarkup | None:
     دیگر دکمه‌ی باطل ندارد.
     """
     rows: list = []
+    status_tags = {"paid": " ✅", "partial": " 🟡"}
     for inv in list(invoices)[:10]:
         money_part = format_amount(inv.total, with_currency=False)
         if getattr(inv, "is_void", False):
             label = f"⛔ {inv.number} — {inv.customer_name} ({texts.INVOICE_VOID_LABEL})"
             rows.append([InlineKeyboardButton(label, callback_data=f"invh:{inv.id}")])
             continue
-        label = f"🧾 {inv.number} — {inv.customer_name} — {money_part}"
-        rows.append([
+        tag = status_tags.get(getattr(inv, "payment_status", ""), "")
+        label = f"🧾 {inv.number} — {inv.customer_name} — {money_part}{tag}"
+        row = [
             InlineKeyboardButton(label, callback_data=f"invh:{inv.id}"),
             InlineKeyboardButton(texts.BTN_INVOICE_VOID,
                                  callback_data=f"invvoid:ask:{inv.id}"),
-        ])
+        ]
+        rows.append(row)
+        if getattr(inv, "payment_status", "") != "paid":
+            rows.append([InlineKeyboardButton(
+                texts.BTN_INVOICE_MARK_PAID, callback_data=f"invpaid:{inv.id}"
+            )])
     return InlineKeyboardMarkup(rows) if rows else None
 
 

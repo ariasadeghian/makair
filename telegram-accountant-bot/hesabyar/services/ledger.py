@@ -197,6 +197,25 @@ def find_party_tg_id(store: Store, user_id: int, party_name: str) -> Optional[in
     return None
 
 
+def receivable_reminder_buckets(
+    store: Store, user_id: int, base: dt.datetime, lead_days: int = 7
+) -> dict:
+    """طلب‌های بازِ دارایِ سررسید، دسته‌بندی برای «یادآوری به بدهکار».
+
+    خروجی: ``{"overdue": [...], "today": [...], "upcoming": [...]}`` — فقط
+    طلب (نه بدهی، چون این برای یادآوری به کسی است که به ما بدهکار است) و
+    ``upcoming`` تا ``lead_days`` روز آینده. این جدا از
+    :func:`entries_due_for_reminder` است (که خلاصه‌ی داخلیِ صاحب‌کار در
+    ``bot.reminders`` را می‌سازد و هر دو جهت را شامل می‌شود).
+    """
+    rows = due_within(store, user_id, lead_days, base)
+    buckets: dict[str, list[LedgerEntry]] = {"overdue": [], "today": [], "upcoming": []}
+    for e in rows:
+        if e.direction == Direction.RECEIVABLE:
+            buckets[due_bucket(e, base)].append(e)
+    return buckets
+
+
 def overdue_entries(
     store: Store, user_id: int, base: dt.datetime, min_days: int = 1
 ) -> list[LedgerEntry]:
@@ -214,18 +233,21 @@ def overdue_entries(
 
 
 def build_debtor_notice(entry: LedgerEntry, business=None) -> str:
-    """متنِ مؤدبانه‌ی یادآوری بدهی که برای خودِ بدهکار فرستاده می‌شود."""
-    who = ""
-    if business is not None and getattr(business, "business_name", None):
-        who = f" از طرف <b>{business.business_name}</b>"
+    """متنِ مؤدبانه‌ی یادآوری بدهی که برای خودِ بدهکار فرستاده می‌شود.
+
+    خطابِ مستقیم به اسمِ بدهکار — آماده‌ی ارسال، بدون نیاز به ویرایش.
+    """
     due = (
         f"\nسررسید: {jalali.format_date(entry.due_date)}"
         if entry.due_date else ""
     )
+    who = ""
+    if business is not None and getattr(business, "business_name", None):
+        who = f"\n\n🏪 از طرف <b>{business.business_name}</b>"
     return (
-        f"🔔 یادآوری دوستانه{who}\n\n"
-        f"مبلغ <b>{money.format_amount(entry.amount)}</b> از حساب شما "
-        f"تسویه نشده است.{due}\n\n"
+        f"سلام <b>{entry.party_name}</b> عزیز 👋\n"
+        f"یادآوری می‌کنم مبلغ <b>{money.format_amount(entry.amount)}</b> "
+        f"بابت حساب شما سررسید شده.{due}{who}\n\n"
         "اگر پرداخت کرده‌اید این پیام را نادیده بگیرید. 🙏"
     )
 
@@ -274,7 +296,35 @@ def party_statement_data(
             for i in invoices
         ],
         "invoiced": sum(int(i.total) for i in invoices),
+        "paid": sum(int(getattr(i, "paid_amount", 0) or 0) for i in invoices),
     }
+
+
+def build_customer_quick_card(data: dict) -> str:
+    """کارتِ کوتاهِ یک مشتری: نام + خرید کل/پرداخت‌شده/مانده (اگر فاکتور دارد)،
+    وگرنه بر پایه‌ی مانده‌ی دفترِ طلب و بدهی.
+
+    ورودی همان چیزی است که :func:`party_statement_data` برمی‌گرداند.
+    """
+    name = data["party"]
+    invoiced = int(data.get("invoiced", 0) or 0)
+    if invoiced > 0:
+        paid = int(data.get("paid", 0) or 0)
+        balance = invoiced - paid
+        return (
+            f"{name}:\n"
+            f"خرید کل: {money.format_amount(invoiced)}\n"
+            f"پرداخت شده: {money.format_amount(paid)}\n"
+            f"مانده: {money.format_amount(balance)}"
+        )
+    net = int(data.get("net", 0) or 0)
+    if net > 0:
+        line = f"بدهکار به شما: {money.format_amount(net)}"
+    elif net < 0:
+        line = f"بستانکار از شما: {money.format_amount(-net)}"
+    else:
+        line = "مانده: تسویه"
+    return f"{name}:\n{line}"
 
 
 def build_party_statement(

@@ -128,6 +128,29 @@ class TestDebtorReminder:
         text = ledger_service.build_debtor_notice(e, owner)
         assert "۵۰۰٬۰۰۰" in text and "بوتیک آرا" in text
 
+    async def test_notice_greets_the_debtor_by_name(self, store):
+        """آماده‌ی ارسال: با اسمِ بدهکار شروع می‌شود، نه یک متنِ ژنریک."""
+        now = jalali.now()
+        await tx.get_or_create_user(store, OWNER)
+        e = await ledger_service.add_entry(
+            store, OWNER, direction=Direction.RECEIVABLE, party_name="علی",
+            amount=3_000_000, due_date=now.date() - dt.timedelta(days=1),
+        )
+        text = ledger_service.build_debtor_notice(e)
+        assert text.startswith("سلام <b>علی</b> عزیز")
+        assert "سررسید شده" in text
+
+    async def test_notice_works_without_a_business_name(self, store):
+        now = jalali.now()
+        await tx.get_or_create_user(store, OWNER)
+        e = await ledger_service.add_entry(
+            store, OWNER, direction=Direction.RECEIVABLE, party_name="سارا",
+            amount=1_000_000, due_date=now.date(),
+        )
+        text = ledger_service.build_debtor_notice(e, business=None)
+        assert "از طرف" not in text
+        assert "سارا" in text
+
 
 # --- ۱۱: شعبه‌ها ---------------------------------------------------------------
 

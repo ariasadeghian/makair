@@ -143,6 +143,26 @@ class TestWhoSeesTheWizard:
         assert User.from_row({"id": "6"}).onboarded is False
 
 
+# --- نقطه‌ی عطفِ شروعِ آنبردینگ (برای قیف/تحلیل) --------------------------------
+
+
+class TestOnboardingStartedMilestone:
+    async def test_start_stamps_onboarding_started_at(self, store):
+        ctx = _ctx(store)
+        await _start(ctx)
+        user = await tx.get_or_create_user(store, UID)
+        assert user.onboarding_started_at is not None
+
+    async def test_second_start_does_not_move_the_stamp(self, store):
+        ctx = _ctx(store)
+        await _start(ctx)
+        first = (await tx.get_or_create_user(store, UID)).onboarding_started_at
+
+        await _start(_ctx(store))
+        second = (await tx.get_or_create_user(store, UID)).onboarding_started_at
+        assert second == first
+
+
 # --- مسیرِ کامل -------------------------------------------------------------------
 
 

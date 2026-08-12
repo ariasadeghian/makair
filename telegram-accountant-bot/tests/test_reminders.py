@@ -67,3 +67,32 @@ async def test_build_message_has_three_sections(store):
 
 def test_build_message_empty_is_blank():
     assert build_reminder_message([], jalali.now()) == ""
+
+
+async def test_receivable_reminder_buckets_only_includes_receivables(store):
+    """این دسته‌بندی برای «یادآوری به بدهکار» است: فقط طلب، و فقط تا یک هفته."""
+    now = jalali.now()
+    today = now.date()
+    await _seed(store, "بدهیِ من", 100_000, today - dt.timedelta(days=1),
+                Direction.PAYABLE)  # بدهی، نه طلب ⇒ نباید بیاید
+    over = await _seed(store, "دیروز", 200_000, today - dt.timedelta(days=1),
+                        Direction.RECEIVABLE)
+    todays = await _seed(store, "امروز", 300_000, today, Direction.RECEIVABLE)
+    soon = await _seed(store, "این‌هفته", 400_000, today + dt.timedelta(days=3),
+                        Direction.RECEIVABLE)
+    far = await _seed(store, "دور", 500_000, today + dt.timedelta(days=20),
+                       Direction.RECEIVABLE)  # خارج از پنجره‌ی ۷روزه
+
+    buckets = ledger_service.receivable_reminder_buckets(store, UID, now)
+    assert [e.id for e in buckets["overdue"]] == [over.id]
+    assert [e.id for e in buckets["today"]] == [todays.id]
+    assert [e.id for e in buckets["upcoming"]] == [soon.id]
+    all_ids = {e.id for rows in buckets.values() for e in rows}
+    assert far.id not in all_ids
+
+
+async def test_receivable_reminder_buckets_empty_when_nothing_due(store):
+    await _seed(store, "دور", 100_000, jalali.now().date() + dt.timedelta(days=30),
+                Direction.RECEIVABLE)
+    buckets = ledger_service.receivable_reminder_buckets(store, UID, jalali.now())
+    assert buckets == {"overdue": [], "today": [], "upcoming": []}

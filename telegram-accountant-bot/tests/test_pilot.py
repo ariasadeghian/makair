@@ -61,3 +61,64 @@ async def test_usage_counts(store):
     assert m["usage"]["ledger"] == 1
     assert m["usage"]["cheques"] == 1
     assert m["usage"]["products"] == 1
+
+
+# --- قیفِ آنبردینگ و DAU (فاز ۱۸) ------------------------------------------------
+
+
+async def test_onboarding_funnel_counts_only_those_who_saw_it(store):
+    now = jalali.now()
+    saw_onboarding = await tx.get_or_create_user(store, 10)
+    saw_onboarding.onboarding_started_at = now
+    await store.update("users", saw_onboarding)
+
+    await tx.get_or_create_user(store, 11)  # هیچ‌کدام از قیف را رد نکرده
+
+    m = pilot.compute_pilot_metrics(store, now)
+    assert m["total_users"] == 2
+    assert m["onboarding_started"] == 1
+    assert m["first_invoice_activated"] == 0
+    assert m["first_contact_activated"] == 0
+
+
+async def test_creating_an_invoice_activates_both_invoice_and_contact_milestones(store):
+    from hesabyar.services import invoices as invoice_service
+
+    now = jalali.now()
+    await tx.get_or_create_user(store, 12)
+    await invoice_service.create_invoice(
+        store, 12, customer_name="علی",
+        items=[{"title": "کالا", "quantity": 1, "unit_price": 10_000}],
+        issue_date=now.date(),
+    )
+    m = pilot.compute_pilot_metrics(store, jalali.now())
+    assert m["first_invoice_activated"] == 1
+    assert m["first_contact_activated"] == 1  # فاکتور خودش رکورد مشتری می‌سازد
+
+
+async def test_active_today_is_narrower_than_active_last_7(store):
+    now = jalali.now()
+    await tx.get_or_create_user(store, 20)
+    await tx.add_transaction(
+        store, 20, kind=Kind.EXPENSE, amount=100, category="x",
+        description="", occurred_at=now,
+    )
+    await tx.get_or_create_user(store, 21)
+    stale = await tx.add_transaction(
+        store, 21, kind=Kind.EXPENSE, amount=100, category="x",
+        description="", occurred_at=now,
+    )
+    stale.created_at = now - dt.timedelta(days=3)  # توی هفته هست، امروز نه
+
+    # ``now``ی تازه: created_atِ تراکنشِ کاربرِ ۲۰ کمی بعد از ``now``ی بالا
+    # مهر خورده (بازه‌ها «تا همین لحظه»اند، نه پایانِ روز/هفته).
+    m = pilot.compute_pilot_metrics(store, jalali.now())
+    assert m["active_today"] == 1
+    assert m["active_last_7"] == 2
+
+
+async def test_report_surfaces_the_new_sections(store):
+    m = pilot.compute_pilot_metrics(store, jalali.now())
+    text = pilot.build_pilot_report(m)
+    assert "قیفِ آنبردینگ" in text
+    assert "DAU" in text

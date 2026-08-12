@@ -77,6 +77,62 @@ class TestPartyStatement:
         assert data["entries"][0]["label"] == "طلب از"
 
 
+class TestCustomerQuickCard:
+    async def test_invoice_based_card_matches_the_exact_shape(self, store):
+        from hesabyar.services import invoices as invoice_service
+
+        await tx.get_or_create_user(store, UID)
+        invoice = await invoice_service.create_invoice(
+            store, UID, customer_name="علی",
+            items=[{"title": "کالا", "quantity": 1, "unit_price": 15_000_000}],
+            issue_date=jalali.now().date(),
+        )
+        await invoice_service.record_payment(store, UID, invoice.id, 10_000_000)
+
+        data = ledger_service.party_statement_data(store, UID, "علی")
+        card = ledger_service.build_customer_quick_card(data)
+        assert card == (
+            "علی:\n"
+            f"خرید کل: {money.format_amount(15_000_000)}\n"
+            f"پرداخت شده: {money.format_amount(10_000_000)}\n"
+            f"مانده: {money.format_amount(5_000_000)}"
+        )
+
+    async def test_falls_back_to_ledger_when_no_invoices(self, store):
+        await tx.get_or_create_user(store, UID)
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.RECEIVABLE,
+            party_name="سارا", amount=2_000_000,
+        )
+        data = ledger_service.party_statement_data(store, UID, "سارا")
+        card = ledger_service.build_customer_quick_card(data)
+        assert card == f"سارا:\nبدهکار به شما: {money.format_amount(2_000_000)}"
+
+    async def test_falls_back_to_payable_wording(self, store):
+        await tx.get_or_create_user(store, UID)
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.PAYABLE,
+            party_name="تأمین‌کننده", amount=3_000_000,
+        )
+        data = ledger_service.party_statement_data(store, UID, "تأمین‌کننده")
+        card = ledger_service.build_customer_quick_card(data)
+        assert card == f"تأمین‌کننده:\nبستانکار از شما: {money.format_amount(3_000_000)}"
+
+    async def test_settled_balance_reads_as_fully_settled(self, store):
+        await tx.get_or_create_user(store, UID)
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.RECEIVABLE,
+            party_name="متعادل", amount=1_000_000,
+        )
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.PAYABLE,
+            party_name="متعادل", amount=1_000_000,
+        )
+        data = ledger_service.party_statement_data(store, UID, "متعادل")
+        card = ledger_service.build_customer_quick_card(data)
+        assert card == "متعادل:\nمانده: تسویه"
+
+
 class TestStatementImage:
     async def test_png_created(self, store, tmp_path):
         from hesabyar.pdf.invoice_pdf import render_statement_image

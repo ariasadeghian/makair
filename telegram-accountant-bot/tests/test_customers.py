@@ -17,6 +17,25 @@ async def _invoice(store, name, amount=500_000):
     )
 
 
+class TestFirstContactMilestone:
+    async def test_stamps_first_contact_once(self, store):
+        await tx.get_or_create_user(store, UID)
+        a = await cust.find_or_create_customer(store, UID, "رضا محمدی")
+        assert (store.get("users", UID)).first_contact_at == a.created_at
+
+        await cust.find_or_create_customer(store, UID, "سارا")
+        # دومین مخاطب مهرِ اول را جابه‌جا نمی‌کند.
+        assert (store.get("users", UID)).first_contact_at == a.created_at
+
+    async def test_enriching_existing_contact_does_not_restamp(self, store):
+        await tx.get_or_create_user(store, UID)
+        await cust.find_or_create_customer(store, UID, "سارا")
+        first_stamp = (store.get("users", UID)).first_contact_at
+
+        await cust.find_or_create_customer(store, UID, "سارا", phone="0912")
+        assert (store.get("users", UID)).first_contact_at == first_stamp
+
+
 class TestFindOrCreate:
     async def test_creates_once_and_reuses(self, store):
         await tx.get_or_create_user(store, UID)

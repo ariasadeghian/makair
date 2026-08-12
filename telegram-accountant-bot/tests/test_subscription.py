@@ -115,3 +115,71 @@ class TestStatusText:
         s = await sub.get_or_create_subscription(store, UID, now=now)
         s.expires_at = now - dt.timedelta(days=1)
         assert "منقضی" in sub.status_text(store, UID, now=now)
+
+
+class TestFreeLimitArchitecture:
+    """معماریِ سقفِ رایگان: فقط محاسبه — هیچ‌جا اجرا/بلاک نمی‌شود (فاز ۱۸)."""
+
+    async def test_usage_this_month_counts_transactions_and_invoices(self, store):
+        from hesabyar.db.models import Kind
+        from hesabyar.services import invoices as invoice_service
+        from hesabyar.services import transactions as tx_service
+
+        await _mk_user(store)
+        now = _now()
+        await tx_service.add_transaction(
+            store, UID, kind=Kind.EXPENSE, amount=1_000,
+            category="متفرقه", description="", occurred_at=now,
+        )
+        await tx_service.add_transaction(
+            store, UID, kind=Kind.INCOME, amount=2_000,
+            category="فروش", description="", occurred_at=now,
+        )
+        await invoice_service.create_invoice(
+            store, UID, customer_name="علی",
+            items=[{"title": "کالا", "quantity": 1, "unit_price": 10_000}],
+            issue_date=now.date(),
+        )
+        # ``now`` را عمداً پاس نمی‌دهیم — created_at با jalali.now()ِ لحظه‌ی
+        # ثبت مهر خورده که کمی بعد از ``now``ی بالاست؛ محاسبه هم باید تازه باشد.
+        usage = sub.usage_this_month(store, UID)
+        assert usage == {"transactions": 2, "invoices": 1}
+
+    async def test_usage_is_zero_for_a_fresh_user(self, store):
+        await _mk_user(store)
+        assert sub.usage_this_month(store, UID) == {"transactions": 0, "invoices": 0}
+
+    async def test_free_limit_status_flags_when_at_or_over_the_cap(self, store):
+        from hesabyar import plans
+        from hesabyar.db.models import Kind
+        from hesabyar.services import transactions as tx_service
+
+        await _mk_user(store)
+        now = _now()
+        cap = plans.FREE_LIMITS["max_transactions_per_month"]
+        for _ in range(cap):
+            await tx_service.add_transaction(
+                store, UID, kind=Kind.EXPENSE, amount=1_000,
+                category="متفرقه", description="", occurred_at=now,
+            )
+        status = sub.free_limit_status(store, UID)  # تازه، نه ``now``ی از قبل
+        assert status["transactions"]["used"] == cap
+        assert status["transactions"]["limit"] == cap
+        assert status["transactions"]["exceeded"] is True
+        assert status["invoices"]["exceeded"] is False
+
+    async def test_free_limits_are_not_enforced_anywhere(self, store):
+        """اسپیریتِ فاز ۱۸: عبور از سقفِ رایگان نباید ثبتِ تراکنش را ببندد."""
+        from hesabyar import plans
+        from hesabyar.db.models import Kind
+        from hesabyar.services import transactions as tx_service
+
+        await _mk_user(store)
+        now = _now()
+        cap = plans.FREE_LIMITS["max_transactions_per_month"]
+        for _ in range(cap + 5):  # از سقف هم رد شد
+            await tx_service.add_transaction(
+                store, UID, kind=Kind.EXPENSE, amount=1_000,
+                category="متفرقه", description="", occurred_at=now,
+            )
+        assert len(store.list("transactions", lambda t: t.user_id == UID)) == cap + 5

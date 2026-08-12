@@ -8,8 +8,9 @@ from __future__ import annotations
 import datetime as dt
 
 from ..core import jalali, money
+from ..db.models import Direction
 from ..db.store import Store
-from . import ledger, transactions
+from . import customers, ledger, transactions
 
 #: «نزدیکِ سررسید» یعنی تا این تعداد روزِ آینده.
 DUE_SOON_DAYS = 2
@@ -151,4 +152,79 @@ def build_daily_digest(
             f"⏰ {money.to_persian_digits(str(stats['due_soon']))} مورد نزدیکِ سررسید "
             f"(تا {money.to_persian_digits(str(DUE_SOON_DAYS))} روز آینده)"
         )
+    return "\n".join(lines)
+
+
+def _has_any_activity(store: Store, user_id: int) -> bool:
+    """آیا این کاربر تا الان اصلاً چیزی (تراکنش/فاکتور/دفتر) ثبت کرده؟"""
+    return bool(
+        store.list("transactions", lambda t: t.user_id == user_id)
+        or store.list("invoices", lambda i: i.user_id == user_id)
+        or store.list("ledger_entries", lambda e: e.user_id == user_id)
+    )
+
+
+def _party_key(entry):
+    """کلیدِ یکتاسازیِ طرف‌حساب — با شناسه‌ی مشتری اگر لینک شده، وگرنه نامِ نرمال‌شده."""
+    return entry.customer_id if entry.customer_id is not None else customers.normalize_name(entry.party_name)
+
+
+def build_business_snapshot(store: Store, user_id: int, now: dt.datetime) -> str:
+    """پیامِ «وضعیتِ کسب‌وکار»: امروز + این ماه + هشدارهای مهم، در یک نگاه.
+
+    برخلاف :func:`build_report` (یک دوره‌ی مشخص) این تابع همان چیزی را می‌سازد
+    که صاحب یک مغازه با یک نگاه باید بفهمد: امروز و این ماه چطور بوده‌ام، و
+    الان به چه چیزهایی باید برسم (بدهکارها، معوقه‌ها، بزرگ‌ترین هزینه).
+    """
+    if not _has_any_activity(store, user_id):
+        return (
+            "📊 <b>وضعیتِ کسب‌وکار</b>\n\n"
+            "هنوز چیزی ثبت نکرده‌ای — یک خرج یا فروش را همین‌جا بنویس تا از "
+            "همین امروز وضعیتت را اینجا ببینی. 🚀"
+        )
+
+    fa = money.format_amount
+    day_start, day_end = jalali.day_bounds(now)
+    today = transactions.summary(store, user_id, day_start, day_end)
+    month_start, month_end = jalali.month_bounds(now)
+    month = transactions.summary(store, user_id, month_start, month_end)
+
+    lines = [
+        "📊 <b>وضعیتِ کسب‌وکار</b>",
+        "",
+        "🌤 <b>امروز:</b>",
+        f"فروش: {fa(today['income'])}",
+        f"هزینه: {fa(today['expense'])}",
+        f"مانده: {fa(today['balance'])}",
+        "",
+        "🗓 <b>این ماه:</b>",
+        f"فروش: {fa(month['income'])}",
+        f"هزینه: {fa(month['expense'])}",
+        f"مانده‌ی تقریبی: {fa(month['balance'])}",
+    ]
+
+    alerts: list[str] = []
+    open_receivables = ledger.list_open(store, user_id, Direction.RECEIVABLE)
+    if open_receivables:
+        parties = {_party_key(e) for e in open_receivables}
+        total = sum(int(e.amount) for e in open_receivables)
+        n = money.to_persian_digits(str(len(parties)))
+        alerts.append(f"👤 {n} نفر به شما بدهکار هستند — جمع: {fa(total)}")
+
+    overdue = ledger.overdue_entries(store, user_id, now)
+    if overdue:
+        n = money.to_persian_digits(str(len(overdue)))
+        alerts.append(f"⏰ {n} پرداختِ معوق — پیگیری کن")
+
+    top_category = max(
+        month["expense_by_category"].items(), key=lambda kv: kv[1], default=None
+    )
+    if top_category:
+        alerts.append(f"🏷 بیشترین هزینه: {top_category[0]} ({fa(top_category[1])})")
+
+    if alerts:
+        lines.append("")
+        lines.append("⚠️ <b>نکته‌های مهم:</b>")
+        lines.extend(alerts)
+
     return "\n".join(lines)

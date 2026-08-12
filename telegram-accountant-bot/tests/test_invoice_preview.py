@@ -120,6 +120,8 @@ async def _press(ctx, data, message=None):
         handler = handlers.on_invoice_draft
     elif data.startswith("invvoid:"):
         handler = handlers.on_invoice_void
+    elif data.startswith("invpaid:"):
+        handler = handlers.on_invoice_paid
     else:                                     # inv:done / inv:pop / inv:add …
         handler = handlers.on_invoice_action
     await handler(_update(query=query), ctx)
@@ -336,12 +338,64 @@ class TestVoiding:
         assert Invoice.from_row(row).is_void is True
 
 
+class TestPaymentStatus:
+    async def test_a_new_invoice_is_unpaid(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)  # ۲ × ۴۵۰٬۰۰۰ = ۹۰۰٬۰۰۰
+        assert invoice.payment_status == "unpaid"
+        assert invoice.balance_due == 900_000
+
+    async def test_record_payment_accumulates_and_caps_at_total(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        updated = await invoice_service.record_payment(store, UID, invoice.id, 300_000)
+        assert updated.paid_amount == 300_000
+        assert updated.payment_status == "partial"
+        assert updated.balance_due == 600_000
+
+        updated = await invoice_service.record_payment(store, UID, invoice.id, 1_000_000)
+        assert updated.paid_amount == 900_000, "نباید از مبلغ کل بیشتر شود"
+        assert updated.payment_status == "paid"
+        assert updated.balance_due == 0
+
+    async def test_mark_fully_paid_sets_paid_amount_to_total(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        updated = await invoice_service.mark_fully_paid(store, UID, invoice.id)
+        assert updated.paid_amount == updated.total == 900_000
+        assert updated.payment_status == "paid"
+
+    async def test_a_void_invoice_cannot_receive_a_payment(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        await invoice_service.void_invoice(store, invoice.id, UID)
+        assert await invoice_service.record_payment(store, UID, invoice.id, 100) is None
+        assert await invoice_service.mark_fully_paid(store, UID, invoice.id) is None
+
+    async def test_another_users_invoice_cannot_be_paid(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        await tx.get_or_create_user(store, UID + 1)
+        assert await invoice_service.mark_fully_paid(store, UID + 1, invoice.id) is None
+
+    async def test_paid_amount_survives_a_round_trip(self, store):
+        invoice = Invoice(id=1, paid_amount=250_000)
+        row = dict(zip(Invoice.COLUMNS, invoice.to_row()))
+        assert Invoice.from_row(row).paid_amount == 250_000
+
+    async def test_old_rows_without_the_column_default_to_unpaid(self, store):
+        assert Invoice.from_row({"id": "1"}).paid_amount == 0
+
+
 class TestVoidFromTheHistory:
     async def test_history_shows_a_void_button_per_invoice(self, store):
         ctx = _ctx(store)
         invoice = await _issued(store, ctx)
         markup = keyboards.invoice_history([store.get("invoices", invoice.id)])
-        assert _cb(markup) == [f"invh:{invoice.id}", f"invvoid:ask:{invoice.id}"]
+        # فاکتورِ تازه‌صادرشده هنوز پرداخت نشده ⇒ دکمه‌ی «ثبت پرداخت» هم دارد.
+        assert _cb(markup) == [
+            f"invh:{invoice.id}", f"invvoid:ask:{invoice.id}", f"invpaid:{invoice.id}"
+        ]
 
     async def test_a_voided_invoice_is_marked_and_loses_its_button(self, store):
         ctx = _ctx(store)
@@ -383,6 +437,45 @@ class TestVoidFromTheHistory:
     async def test_bad_callback_data_is_ignored(self, store):
         ctx = _ctx(store)
         query = await _press(ctx, "invvoid:ask:xyz")
+        assert query.edits == []
+
+
+class TestMarkPaidFromTheHistory:
+    async def test_a_fresh_invoice_offers_the_mark_paid_button(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        markup = keyboards.invoice_history([store.get("invoices", invoice.id)])
+        assert f"invpaid:{invoice.id}" in _cb(markup)
+
+    async def test_tapping_it_marks_the_invoice_fully_paid(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        query = await _press(ctx, f"invpaid:{invoice.id}")
+
+        stored = store.get("invoices", invoice.id)
+        assert stored.payment_status == "paid"
+        assert stored.paid_amount == stored.total
+        # لیست به‌روزشده جای پیام قبلی می‌نشیند و دیگر دکمه‌ی «ثبت پرداخت» ندارد.
+        assert query.edits[-1]["text"] == texts.INVOICE_LIST_HEADER
+        assert f"invpaid:{invoice.id}" not in _cb(query.edits[-1]["reply_markup"])
+
+    async def test_a_paid_invoice_loses_the_mark_paid_button(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        await _press(ctx, f"invpaid:{invoice.id}")
+        markup = keyboards.invoice_history([store.get("invoices", invoice.id)])
+        assert f"invpaid:{invoice.id}" not in _cb(markup)
+        label = markup.inline_keyboard[0][0].text
+        assert "✅" in label
+
+    async def test_marking_an_unknown_invoice_does_not_crash(self, store):
+        ctx = _ctx(store)
+        query = await _press(ctx, "invpaid:999999")
+        assert query.edits == []  # چیزی برای ویرایش نبود، فقط پیامِ toast رفت
+
+    async def test_bad_callback_data_is_ignored(self, store):
+        ctx = _ctx(store)
+        query = await _press(ctx, "invpaid:xyz")
         assert query.edits == []
 
 

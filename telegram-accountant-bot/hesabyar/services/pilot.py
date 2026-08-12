@@ -39,7 +39,8 @@ def compute_pilot_metrics(store: Store, now: dt.datetime) -> dict:
         lst.sort(key=lambda t: _ts(t.created_at))
 
     horizon_7 = now - dt.timedelta(days=7)
-    activated = fast_activation = active_last_7 = 0
+    today_start, today_end = jalali.day_bounds(now)
+    activated = fast_activation = active_last_7 = active_today = 0
     activation_secs: list[float] = []
     d7_eligible = d7_returned = 0
     w2_eligible = w2_active = 0
@@ -55,8 +56,11 @@ def compute_pilot_metrics(store: Store, now: dt.datetime) -> dict:
                     activation_secs.append(secs)
                     if secs <= FAST_ACTIVATION_SECONDS:
                         fast_activation += 1
-            if u_txs[-1].created_at and u_txs[-1].created_at >= horizon_7:
+            last_tx_at = u_txs[-1].created_at
+            if last_tx_at and last_tx_at >= horizon_7:
                 active_last_7 += 1
+            if last_tx_at and today_start <= last_tx_at <= today_end:
+                active_today += 1
 
         if u.created_at and (now - u.created_at) >= dt.timedelta(days=7):
             d7_eligible += 1
@@ -77,12 +81,21 @@ def compute_pilot_metrics(store: Store, now: dt.datetime) -> dict:
     for u in users:
         by_industry[getattr(u, "business_type", "") or ""] += 1
 
+    # قیفِ آنبردینگ: شروع → اولین تراکنش (activated) → اولین فاکتور → اولین مخاطب.
+    onboarding_started = sum(1 for u in users if getattr(u, "onboarding_started_at", None))
+    first_invoice_activated = sum(1 for u in users if getattr(u, "first_invoice_at", None))
+    first_contact_activated = sum(1 for u in users if getattr(u, "first_contact_at", None))
+
     return {
         "total_users": len(users),
+        "onboarding_started": onboarding_started,
         "activated": activated,
+        "first_invoice_activated": first_invoice_activated,
+        "first_contact_activated": first_contact_activated,
         "by_industry": dict(by_industry),
         "fast_activation": fast_activation,
         "median_activation_secs": median(activation_secs) if activation_secs else None,
+        "active_today": active_today,
         "active_last_7": active_last_7,
         "d7_eligible": d7_eligible,
         "d7_returned": d7_returned,
@@ -136,6 +149,17 @@ def build_pilot_report(metrics: dict) -> str:
         f"✅ فعال‌شده (≥۱ ثبت): {_fa(m['activated'])} "
         f"({_pct(m['activated'], m['total_users'])})",
         "",
+        "🚦 <b>قیفِ آنبردینگ</b>",
+        f"۱. شروع کردند: {_fa(m['total_users'])}",
+        f"۲. آنبردینگ را دیدند: {_fa(m.get('onboarding_started', 0))} "
+        f"({_pct(m.get('onboarding_started', 0), m['total_users'])})",
+        f"۳. اولین ثبت: {_fa(m['activated'])} "
+        f"({_pct(m['activated'], m['total_users'])})",
+        f"۴. اولین فاکتور: {_fa(m.get('first_invoice_activated', 0))} "
+        f"({_pct(m.get('first_invoice_activated', 0), m['total_users'])})",
+        f"۵. اولین مخاطب: {_fa(m.get('first_contact_activated', 0))} "
+        f"({_pct(m.get('first_contact_activated', 0), m['total_users'])})",
+        "",
         "🎯 <b>سه سنجه‌ی کلیدی</b>",
         f"۱) فعال‌سازیِ سریع (زیر ۲ دقیقه): {_fa(m['fast_activation'])} "
         f"از {_fa(m['activated'])} — میانه: {_fmt_duration(m['median_activation_secs'])}",
@@ -144,6 +168,7 @@ def build_pilot_report(metrics: dict) -> str:
         f"۳) فعالِ هفته‌ی دوم (≥۵ ثبت): {_fa(m['w2_active'])} از {_fa(m['w2_eligible'])} "
         f"({_pct(m['w2_active'], m['w2_eligible'])})",
         "",
+        f"📅 فعال امروز (DAU): {_fa(m.get('active_today', 0))}",
         f"🔥 فعال در ۷ روز اخیر: {_fa(m['active_last_7'])}",
         "",
         "📊 <b>استفاده از قابلیت‌ها</b> (چه چیزی واقعاً کار می‌کند)",

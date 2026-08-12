@@ -30,6 +30,23 @@ def _sample_items() -> list[dict]:
     ]
 
 
+class TestFirstInvoiceMilestone:
+    async def test_stamps_first_invoice_once(self, store):
+        await transactions.get_or_create_user(store, USER_ID)
+        first = await invoices.create_invoice(
+            store, USER_ID, customer_name="علی", items=_sample_items(),
+            issue_date=_date(1403, 5, 1),
+        )
+        assert (store.get("users", USER_ID)).first_invoice_at == first.created_at
+
+        await invoices.create_invoice(
+            store, USER_ID, customer_name="رضا", items=_sample_items(),
+            issue_date=_date(1403, 5, 2),
+        )
+        # دومین فاکتور مهرِ اول را جابه‌جا نمی‌کند.
+        assert (store.get("users", USER_ID)).first_invoice_at == first.created_at
+
+
 class TestNextInvoiceNumber:
     async def test_starts_from_one(self, store):
         await transactions.get_or_create_user(store, USER_ID)

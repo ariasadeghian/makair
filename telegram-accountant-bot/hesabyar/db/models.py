@@ -34,6 +34,14 @@ class InvoiceStatus:
     ALL = (ISSUED, VOID)
 
 
+class InvoicePaymentStatus:
+    """وضعیتِ پرداختِ فاکتور — مستقل از ``InvoiceStatus`` (باطل/صادر)."""
+
+    UNPAID = "unpaid"
+    PARTIAL = "partial"
+    PAID = "paid"
+
+
 class Instrument:
     CASH = "cash"      # نقدی/معمولی
     CHEQUE = "cheque"  # چک (سررسیدِ پاس‌شدن مهم است)
@@ -115,6 +123,9 @@ class User:
         "mobile", "postal_code", "email", "instagram", "website",
         "economic_code", "national_id",
         "logo_file_id", "stamp_file_id",
+        # نقاطِ عطفِ فعال‌سازی — برای قیفِ آنبردینگ و تحلیلِ محصول
+        "onboarding_started_at", "first_transaction_at",
+        "first_invoice_at", "first_contact_at",
     )
 
     id: Optional[int] = None
@@ -141,6 +152,11 @@ class User:
     #: file_idهای تلگرام برای لوگو و مهر/امضا (باینری روی شیت نمی‌رود)
     logo_file_id: str = ""
     stamp_file_id: str = ""
+    #: --- قیفِ آنبردینگ: هرکدام فقط یک‌بار و همان لحظه‌ی اولین رخداد پر می‌شود ---
+    onboarding_started_at: Optional[dt.datetime] = None
+    first_transaction_at: Optional[dt.datetime] = None
+    first_invoice_at: Optional[dt.datetime] = None
+    first_contact_at: Optional[dt.datetime] = None
 
     def to_row(self) -> list:
         return [
@@ -151,6 +167,8 @@ class User:
             _s(self.instagram), _s(self.website), _s(self.economic_code),
             _s(self.national_id),
             _s(self.logo_file_id), _s(self.stamp_file_id),
+            _s(self.onboarding_started_at), _s(self.first_transaction_at),
+            _s(self.first_invoice_at), _s(self.first_contact_at),
         ]
 
     @classmethod
@@ -176,6 +194,10 @@ class User:
             national_id=_pstr(d.get("national_id")),
             logo_file_id=_pstr(d.get("logo_file_id")),
             stamp_file_id=_pstr(d.get("stamp_file_id")),
+            onboarding_started_at=_pdt(d.get("onboarding_started_at")),
+            first_transaction_at=_pdt(d.get("first_transaction_at")),
+            first_invoice_at=_pdt(d.get("first_invoice_at")),
+            first_contact_at=_pdt(d.get("first_contact_at")),
         )
 
 
@@ -327,7 +349,7 @@ class Invoice:
         "seller_postal_code", "seller_email", "seller_instagram", "seller_website",
         "seller_economic_code", "seller_national_id",
         "seller_logo_file_id", "seller_stamp_file_id",
-        "status",
+        "status", "paid_amount",
     )
 
     id: Optional[int] = None
@@ -365,6 +387,8 @@ class Invoice:
     seller_stamp_file_id: str = ""
     #: «issued» یا «void» — باطل‌شده شماره‌اش را نگه می‌دارد ولی سند نیست.
     status: str = InvoiceStatus.ISSUED
+    #: چقدر از مبلغِ این فاکتور تا الان پرداخت شده (دستی، توسط صاحب‌کار ثبت می‌شود).
+    paid_amount: int = 0
     #: اقلام فاکتور — از جدول invoice_items پر می‌شود (در شیت ذخیره نمی‌شود).
     items: list = field(default_factory=list)
 
@@ -380,6 +404,18 @@ class Invoice:
     def total(self) -> int:
         return self.subtotal - int(self.discount or 0) + int(self.shipping or 0)
 
+    @property
+    def balance_due(self) -> int:
+        return max(0, self.total - int(self.paid_amount or 0))
+
+    @property
+    def payment_status(self) -> str:
+        if self.total <= 0 or int(self.paid_amount or 0) >= self.total:
+            return InvoicePaymentStatus.PAID
+        if int(self.paid_amount or 0) > 0:
+            return InvoicePaymentStatus.PARTIAL
+        return InvoicePaymentStatus.UNPAID
+
     def to_row(self) -> list:
         return [
             _s(self.id), _s(self.user_id), _s(self.number), _s(self.seq),
@@ -394,7 +430,7 @@ class Invoice:
             _s(self.seller_instagram), _s(self.seller_website),
             _s(self.seller_economic_code), _s(self.seller_national_id),
             _s(self.seller_logo_file_id), _s(self.seller_stamp_file_id),
-            _s(self.status),
+            _s(self.status), _s(self.paid_amount),
         ]
 
     @classmethod
@@ -430,6 +466,8 @@ class Invoice:
             seller_stamp_file_id=_pstr(d.get("seller_stamp_file_id")),
             # ردیف‌های قدیمی این ستون را ندارند و همه‌شان معتبرند
             status=_pstr(d.get("status")) or InvoiceStatus.ISSUED,
+            # ردیف‌های قدیمی این ستون را ندارند ⇒ هنوز چیزی ثبت نشده (۰)
+            paid_amount=_pint(d.get("paid_amount")) or 0,
         )
 
 

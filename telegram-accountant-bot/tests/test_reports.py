@@ -4,8 +4,8 @@ import datetime as dt
 import jdatetime
 
 from hesabyar.core import jalali, money
-from hesabyar.db.models import Kind
-from hesabyar.services import reports, transactions
+from hesabyar.db.models import Direction, Kind
+from hesabyar.services import ledger, reports, transactions
 
 USER_ID = 777_222
 
@@ -14,6 +14,10 @@ def _dt(year: int, month: int, day: int, hh: int = 12, mm: int = 0) -> dt.dateti
     """ساخت datetime aware تهران از تاریخ شمسی."""
     g = jdatetime.date(year, month, day).togregorian()
     return dt.datetime(g.year, g.month, g.day, hh, mm, tzinfo=jalali.TEHRAN)
+
+
+def _date(year: int, month: int, day: int) -> dt.date:
+    return jdatetime.date(year, month, day).togregorian()
 
 
 async def _seed_month(store) -> None:
@@ -67,6 +71,67 @@ class TestBuildReport:
         assert money.format_amount(600_000) in text
         # تعداد تراکنش (۴) با ارقام فارسی.
         assert money.to_persian_digits("4") in text
+
+
+class TestBusinessSnapshot:
+    async def test_brand_new_user_gets_a_nudge_not_zeros(self, store):
+        await transactions.get_or_create_user(store, USER_ID)
+        text = reports.build_business_snapshot(store, USER_ID, _dt(1403, 5, 15))
+        assert "هنوز چیزی ثبت نکرده‌ای" in text
+        assert money.format_amount(0) not in text
+
+    async def test_shows_today_and_month_numbers(self, store):
+        await _seed_month(store)
+        base = _dt(1403, 5, 15, 18, 0)
+        text = reports.build_business_snapshot(store, USER_ID, base)
+        assert "امروز" in text and "این ماه" in text
+        # جمع درآمدِ ماه (فقط یک تراکنشِ درآمد در _seed_month).
+        assert money.format_amount(2_000_000) in text
+        # مانده‌ی تقریبیِ ماه = ۲۰۰۰۰۰۰ - ۱۱۰۰۰۰۰.
+        assert money.format_amount(900_000) in text
+        # بزرگ‌ترین دسته‌ی هزینه.
+        assert "قبوض" in text
+
+    async def test_counts_distinct_debtors_not_entries(self, store):
+        await _seed_month(store)
+        base = _dt(1403, 5, 15, 18, 0)
+        # دو ردیفِ طلب از «رضا» — باید یک نفر شمرده شود، نه دو.
+        await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="رضا", amount=1_000_000, due_date=_date(1403, 5, 20),
+        )
+        await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="رضا", amount=500_000, due_date=_date(1403, 5, 25),
+        )
+        await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="سارا", amount=300_000, due_date=_date(1403, 5, 25),
+        )
+        text = reports.build_business_snapshot(store, USER_ID, base)
+        assert "۲ نفر به شما بدهکار هستند" in text
+        assert money.format_amount(1_800_000) in text  # جمعِ کل سه ردیف
+
+    async def test_flags_overdue_payments(self, store):
+        await _seed_month(store)
+        base = _dt(1403, 5, 15, 18, 0)
+        await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="رضا", amount=1_000_000, due_date=_date(1403, 5, 10),
+        )
+        text = reports.build_business_snapshot(store, USER_ID, base)
+        assert "معوق" in text
+
+    async def test_no_alerts_section_when_nothing_to_flag(self, store):
+        # فقط یک تراکنشِ درآمد — بدون هزینه، بدون طلبِ باز، بدون معوقه.
+        await transactions.get_or_create_user(store, USER_ID)
+        await transactions.add_transaction(
+            store, USER_ID, kind=Kind.INCOME, amount=2_000_000,
+            category="فروش کالا", description="", occurred_at=_dt(1403, 5, 3),
+        )
+        base = _dt(1403, 5, 15, 18, 0)
+        text = reports.build_business_snapshot(store, USER_ID, base)
+        assert "نکته‌های مهم" not in text
 
     async def test_empty_report(self, store):
         await transactions.get_or_create_user(store, USER_ID)

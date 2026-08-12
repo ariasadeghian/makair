@@ -161,6 +161,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             # همین حالا علامت می‌خورد: ویزارد یک‌بار پیشنهاد می‌شود، حتی اگر
             # کاربر مرحله‌ها را رد کند یا نصفه رهایش کند.
             user.onboarded = True
+            if user.onboarding_started_at is None:
+                user.onboarding_started_at = jalali.now()
             await session.update("users", user)
         session.commit()
     if done:
@@ -936,6 +938,9 @@ async def on_report_period(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     with _session(context) as session:
         await tx_service.get_or_create_user(session, uid)
         session.commit()
+        if period == "snapshot":
+            snapshot = report_service.build_business_snapshot(session, uid, jalali.now())
+            return await query.edit_message_text(snapshot, parse_mode="HTML")
         report = report_service.build_report(session, uid, jalali.now(), period)
     await query.edit_message_text(report)
 
@@ -1171,6 +1176,8 @@ async def _handle_statement(update, context, text: str) -> None:
             texts.STATEMENT_EMPTY.format(name=name),
             reply_markup=keyboards.main_menu(),
         )
+    quick_card = ledger_service.build_customer_quick_card(data)
+    caption = f"{quick_card}\n\n{texts.STATEMENT_CAPTION_HINT}"
     out_path = os.path.join(tempfile.gettempdir(), f"statement_{uid}.png")
     try:
         render_statement_image(
@@ -1179,7 +1186,7 @@ async def _handle_statement(update, context, text: str) -> None:
         with open(out_path, "rb") as fh:
             await context.bot.send_photo(
                 chat_id, photo=fh,
-                caption=texts.STATEMENT_CAPTION.format(name=name),
+                caption=caption,
                 reply_markup=keyboards.main_menu(),
             )
     except Exception:  # noqa: BLE001 - اگر رندر تصویر نشد، متن را می‌فرستیم
@@ -1723,6 +1730,27 @@ async def on_invoice_void(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             texts.INVOICE_LIST_HEADER,
             reply_markup=keyboards.invoice_history(invoices),
         )
+
+
+async def on_invoice_paid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """✅ در تاریخچه: کل فاکتور را یک‌لمسی «پرداخت‌شده» می‌کند (بدون نیاز به تأیید)."""
+    query = update.callback_query
+    try:
+        invoice_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return await query.answer()
+    uid = update.effective_user.id
+    with _session(context) as session:
+        invoice = await invoice_service.mark_fully_paid(session, uid, invoice_id)
+        if invoice is not None:
+            await session.flush()  # سندِ مالی، فوری روی شیت
+        invoices = invoice_service.list_invoices(session, uid, limit=10)
+    if invoice is None:
+        return await query.answer(texts.INVOICE_PAID_GONE, show_alert=True)
+    await query.answer(texts.INVOICE_MARKED_PAID.format(number=invoice.number))
+    await _safe_edit(
+        query, texts.INVOICE_LIST_HEADER, reply_markup=keyboards.invoice_history(invoices)
+    )
 
 
 async def _finalize_invoice(update, context) -> None:
@@ -2982,30 +3010,45 @@ async def on_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # --- یادآوری بدهی به خودِ مشتری ------------------------------------------------
 
 
+#: ترتیبِ نمایشِ دسته‌ها و عنوانِ هرکدام (همان عنوان‌های خلاصه‌ی شبانه‌ی جهانی).
+_REMIND_SECTIONS = (
+    ("overdue", texts.REMINDER_OVERDUE_TITLE),
+    ("today", texts.REMINDER_TODAY_TITLE),
+    ("upcoming", texts.REMINDER_UPCOMING_TITLE),
+)
+
+
 async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """دستور /remind — طلب‌های معوق، با دکمه‌ی «یادآوری به مشتری»."""
+    """دستور /remind — طلب‌های معوق/امروز/نزدیک، با دکمه‌ی «یادآوری به مشتری»."""
     uid = update.effective_user.id
     store = _store(context)
     await tx_service.get_or_create_user(store, uid)
-    entries = ledger_service.overdue_entries(store, uid, jalali.now())
-    if not entries:
+    buckets = ledger_service.receivable_reminder_buckets(store, uid, jalali.now())
+    ordered = [e for _key, _title in _REMIND_SECTIONS for e in buckets[_key]]
+    if not ordered:
         return await update.message.reply_text(texts.REMIND_NONE)
 
-    reachable = [
-        (e, ledger_service.find_party_tg_id(store, uid, e.party_name))
-        for e in entries
-    ]
+    reachable = {
+        e.id: ledger_service.find_party_tg_id(store, uid, e.party_name)
+        for e in ordered
+    }
     lines = [texts.REMIND_HEADER]
-    for e, tg in reachable:
-        mark = "" if tg else texts.REMIND_NO_CONTACT
-        lines.append(
-            f"• {e.party_name}: {money.format_amount(e.amount)}"
-            f" (سررسید {jalali.format_date(e.due_date)}){mark}"
-        )
+    for key, title in _REMIND_SECTIONS:
+        rows = buckets[key]
+        if not rows:
+            continue
+        lines.append("")
+        lines.append(title)
+        for e in rows:
+            mark = "" if reachable[e.id] else texts.REMIND_NO_CONTACT
+            lines.append(
+                f"• {e.party_name}: {money.format_amount(e.amount)}"
+                f" (سررسید {jalali.format_date(e.due_date)}){mark}"
+            )
     await update.message.reply_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=keyboards.debtor_reminders(
-            [(e, tg) for e, tg in reachable if tg]
+            [(e, reachable[e.id]) for e in ordered if reachable[e.id]]
         ),
     )
 
@@ -3248,6 +3291,7 @@ def register(application: Application) -> None:
     application.add_handler(CallbackQueryHandler(on_ledger_nlp, pattern=r"^lednlp:"))
     application.add_handler(CallbackQueryHandler(on_invoice_draft, pattern=r"^invdraft:"))
     application.add_handler(CallbackQueryHandler(on_invoice_void, pattern=r"^invvoid:"))
+    application.add_handler(CallbackQueryHandler(on_invoice_paid, pattern=r"^invpaid:"))
     application.add_handler(CallbackQueryHandler(on_invoice_action, pattern=r"^inv:"))
     application.add_handler(CallbackQueryHandler(on_product_action, pattern=r"^prod:"))
     application.add_handler(CallbackQueryHandler(on_product_category, pattern=r"^pcat:"))

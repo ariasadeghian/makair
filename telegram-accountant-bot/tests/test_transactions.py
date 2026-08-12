@@ -31,6 +31,25 @@ class TestGetOrCreateUser:
         assert len(store.list("users")) == 1
 
 
+class TestFirstTransactionMilestone:
+    async def test_stamps_first_transaction_once(self, store):
+        await transactions.get_or_create_user(store, USER_ID)
+        assert (store.get("users", USER_ID)).first_transaction_at is None
+
+        first = await transactions.add_transaction(
+            store, USER_ID, kind=Kind.EXPENSE, amount=1_000,
+            category="متفرقه", description="", occurred_at=_dt(1403, 5, 3),
+        )
+        assert (store.get("users", USER_ID)).first_transaction_at == first.created_at
+
+        await transactions.add_transaction(
+            store, USER_ID, kind=Kind.EXPENSE, amount=2_000,
+            category="متفرقه", description="", occurred_at=_dt(1403, 5, 4),
+        )
+        # دومین تراکنش مهرِ اول را جابه‌جا نمی‌کند.
+        assert (store.get("users", USER_ID)).first_transaction_at == first.created_at
+
+
 class TestAddAndList:
     async def test_add_transaction_persists(self, store):
         await transactions.get_or_create_user(store, USER_ID)

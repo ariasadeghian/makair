@@ -88,6 +88,9 @@ async def create_invoice(
         )
         await store.add("invoice_items", row)
         invoice.items.append(row)
+    if owner is not None and owner.first_invoice_at is None:
+        owner.first_invoice_at = invoice.created_at
+        await store.update("users", owner)
     return invoice
 
 
@@ -103,6 +106,29 @@ async def void_invoice(
     if invoice is None or invoice.is_void:
         return None
     invoice.status = InvoiceStatus.VOID
+    await store.update("invoices", invoice)
+    return invoice
+
+
+async def record_payment(
+    store: Store, user_id: int, invoice_id: int, amount: int
+) -> Optional[Invoice]:
+    """مبلغی به پرداختیِ فاکتور اضافه می‌کند (نه جایگزین) — از مبلغ کل بیشتر نمی‌شود."""
+    invoice = get_invoice(store, invoice_id, user_id)
+    if invoice is None or invoice.is_void:
+        return None
+    add = max(0, int(amount or 0))
+    invoice.paid_amount = min(invoice.total, int(invoice.paid_amount or 0) + add)
+    await store.update("invoices", invoice)
+    return invoice
+
+
+async def mark_fully_paid(store: Store, user_id: int, invoice_id: int) -> Optional[Invoice]:
+    """کل مبلغِ فاکتور را «پرداخت‌شده» می‌کند — رایج‌ترین حالت (پرداختِ کامل/نقدی)."""
+    invoice = get_invoice(store, invoice_id, user_id)
+    if invoice is None or invoice.is_void:
+        return None
+    invoice.paid_amount = invoice.total
     await store.update("invoices", invoice)
     return invoice
 

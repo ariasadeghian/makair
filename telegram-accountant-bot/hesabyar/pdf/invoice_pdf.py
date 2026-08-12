@@ -371,6 +371,23 @@ def render_invoice_pdf(
             )
     story.append(_para(f"جمع کل: {money.format_amount(total)}", total_style))
 
+    # --- وضعیتِ پرداخت -----------------------------------------------------------
+    payment_status = getattr(invoice, "payment_status", None)
+    if payment_status is not None:
+        paid_amount = int(getattr(invoice, "paid_amount", 0) or 0)
+        balance_due = int(getattr(invoice, "balance_due", max(0, total - paid_amount)))
+        status_labels = {
+            "paid": "✅ پرداخت شده",
+            "partial": (
+                f"🟡 بخشی پرداخت شده ({money.format_amount(paid_amount)}) — "
+                f"مانده: {money.format_amount(balance_due)}"
+            ),
+            "unpaid": "🔴 پرداخت‌نشده",
+        }
+        label = status_labels.get(payment_status)
+        if label:
+            story.append(_para(f"وضعیت پرداخت: {label}", normal_style))
+
     # --- اطلاعات پرداخت (در صورت وجود) ---------------------------------------
     if payment_note:
         story.append(Spacer(1, 4 * mm))

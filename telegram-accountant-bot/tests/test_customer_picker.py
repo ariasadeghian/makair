@@ -3,9 +3,12 @@ from types import SimpleNamespace
 
 from hesabyar.bot import handlers, keyboards, texts
 from hesabyar.config import Settings
+from hesabyar.core import jalali, money
 from hesabyar.db.models import Direction
 from hesabyar.services import customers as customers_service
+from hesabyar.services import invoices as invoice_service
 from hesabyar.services import ledger as ledger_service
+from hesabyar.services import subscription as sub_service
 from hesabyar.services import transactions as tx
 
 UID = 11_001
@@ -352,6 +355,53 @@ class TestOrdering:
                 if d.startswith("cust:pick:")]
         assert data[0] == f"cust:pick:{new.id}"
         assert f"cust:pick:{old.id}" in data
+
+
+# --- کارتِ سریعِ مشتری روی کپشنِ صورتحساب (فاز ۱۸) --------------------------------
+
+
+class TestStatementQuickCard:
+    async def test_caption_shows_invoice_based_numbers(self, store):
+        ctx = _ctx(store)
+        await tx.get_or_create_user(store, UID)
+        await sub_service.get_or_create_subscription(store, UID)  # صورتحساب سطحِ نقره‌ای+
+        invoice = await invoice_service.create_invoice(
+            store, UID, customer_name="علی",
+            items=[{"title": "کالا", "quantity": 1, "unit_price": 15_000_000}],
+            issue_date=jalali.now().date(),
+        )
+        await invoice_service.record_payment(store, UID, invoice.id, 10_000_000)
+
+        query = _Query("ledger:statement")
+        await handlers.on_ledger_action(_update(query=query), ctx)
+        assert ctx.user_data["flow"] == "statement_party"
+
+        await handlers.on_text(_update(message=_Msg("علی")), ctx)
+
+        caption = ctx.bot.sent[-1].get("caption", "")
+        assert caption.startswith("علی:")
+        assert "خرید کل" in caption and money.format_amount(15_000_000) in caption
+        assert "پرداخت شده" in caption and money.format_amount(10_000_000) in caption
+        assert "مانده" in caption and money.format_amount(5_000_000) in caption
+
+    async def test_caption_falls_back_to_ledger_net_without_invoices(self, store):
+        ctx = _ctx(store)
+        await tx.get_or_create_user(store, UID)
+        await sub_service.get_or_create_subscription(store, UID)
+        await ledger_service.add_entry(
+            store, UID, direction=Direction.RECEIVABLE,
+            party_name="سارا", amount=2_000_000,
+        )
+
+        query = _Query("ledger:statement")
+        await handlers.on_ledger_action(_update(query=query), ctx)
+        await handlers.on_text(_update(message=_Msg("سارا")), ctx)
+
+        caption = ctx.bot.sent[-1].get("caption", "")
+        assert caption.startswith("سارا:")
+        assert "بدهکار به شما" in caption
+        assert money.format_amount(2_000_000) in caption
+        assert "خرید کل" not in caption
 
 
 class TestRegistration:

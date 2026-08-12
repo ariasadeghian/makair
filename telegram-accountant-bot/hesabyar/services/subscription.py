@@ -11,7 +11,7 @@ from typing import Optional
 from ..core import jalali, money
 from ..db.models import Payment, PaymentStatus, Subscription
 from ..db.store import Store
-from ..plans import TRIAL_DAYS, get_plan, plan_has_feature, tier_label, tier_of
+from ..plans import FREE_LIMITS, TRIAL_DAYS, get_plan, plan_has_feature, tier_label, tier_of
 
 
 def _as_aware(value: Optional[dt.datetime]) -> Optional[dt.datetime]:
@@ -165,6 +165,48 @@ def build_value_recap(store: Store, user_id: int) -> str:
     if ledger_count:
         parts.append(f"{fa(str(ledger_count))} طلب/بدهی")
     return "تا امروز " + "، ".join(parts) + " اینجا ثبت کرده‌ای. 📚"
+
+
+def usage_this_month(
+    store: Store, user_id: int, now: Optional[dt.datetime] = None
+) -> dict:
+    """تعداد تراکنش/فاکتورِ این کاربر در ماهِ جاری."""
+    now = now or jalali.now()
+    start, end = jalali.month_bounds(now)
+    tx_count = len(store.list(
+        "transactions",
+        lambda t: t.user_id == user_id and t.created_at is not None
+        and start <= t.created_at <= end,
+    ))
+    inv_count = len(store.list(
+        "invoices",
+        lambda i: i.user_id == user_id and i.created_at is not None
+        and start <= i.created_at <= end,
+    ))
+    return {"transactions": tx_count, "invoices": inv_count}
+
+
+def free_limit_status(
+    store: Store, user_id: int, now: Optional[dt.datetime] = None
+) -> dict:
+    """مصرفِ این ماه در برابرِ سقفِ سطحِ رایگان (``plans.FREE_LIMITS``).
+
+    فقط محاسبه — معماریِ آماده برای یک سقفِ رایگانِ احتمالی در آینده؛ هیچ
+    هندلری این را برای بلاک‌کردن صدا نمی‌زند (طبق درخواستِ محصول).
+    """
+    usage = usage_this_month(store, user_id, now)
+    tx_limit = FREE_LIMITS["max_transactions_per_month"]
+    inv_limit = FREE_LIMITS["max_invoices_per_month"]
+    return {
+        "transactions": {
+            "used": usage["transactions"], "limit": tx_limit,
+            "exceeded": usage["transactions"] >= tx_limit,
+        },
+        "invoices": {
+            "used": usage["invoices"], "limit": inv_limit,
+            "exceeded": usage["invoices"] >= inv_limit,
+        },
+    }
 
 
 #: روزهای مانده‌ای که در آن‌ها هشدارِ اتمام می‌فرستیم.
