@@ -95,7 +95,7 @@ def invoice_menu() -> InlineKeyboardMarkup:
 
 
 def business_menu() -> InlineKeyboardMarkup:
-    """زیرمنوی کسب‌وکار: صنف، شعبه‌ها و نرخ دلار."""
+    """زیرمنوی کسب‌وکار: صنف، شعبه‌ها، نرخ دلار و اعلان‌ها."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(texts.BTN_M_BIZNAME, callback_data="act:bizname"),
@@ -109,7 +109,25 @@ def business_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(texts.BTN_M_DOLLAR, callback_data="act:dollar"),
             InlineKeyboardButton(texts.BTN_M_RATE, callback_data="act:rate"),
         ],
+        [InlineKeyboardButton(texts.BTN_M_NOTIFICATIONS, callback_data="act:notifs")],
         [InlineKeyboardButton(texts.BTN_M_LEAVE, callback_data="act:leave")],
+        _back_row(),
+    ])
+
+
+def notification_prefs(user) -> InlineKeyboardMarkup:
+    """دکمه‌های «🔔 اعلان‌ها» — روی هرکدام وضعیتِ فعلی‌اش نوشته شده، لمس برعکسش می‌کند."""
+    close_state = texts.NOTIF_ON if getattr(user, "notify_daily_close", True) else texts.NOTIF_OFF
+    remind_state = texts.NOTIF_ON if getattr(user, "notify_due_reminders", True) else texts.NOTIF_OFF
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"{texts.NOTIF_DAILY_CLOSE_LABEL}: {close_state}",
+            callback_data="notif:daily_close",
+        )],
+        [InlineKeyboardButton(
+            f"{texts.NOTIF_DUE_REMINDERS_LABEL}: {remind_state}",
+            callback_data="notif:due_reminders",
+        )],
         _back_row(),
     ])
 
@@ -231,9 +249,14 @@ def product_category_picker(categories) -> InlineKeyboardMarkup:
 
 
 def daily_summary_actions() -> InlineKeyboardMarkup:
-    """زیرِ خلاصه‌ی آخر روز: راهِ یک‌لمسی به گزارشِ کامل."""
+    """زیرِ جمع‌بندیِ آخر روز: ثبتِ سریعِ چیزی که جا مانده، یا تأییدِ تمام‌شدن."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(texts.BTN_FULL_REPORT, callback_data="menu:report")]
+        [
+            InlineKeyboardButton(texts.BTN_DCLOSE_INCOME, callback_data="dclose:income"),
+            InlineKeyboardButton(texts.BTN_DCLOSE_EXPENSE, callback_data="dclose:expense"),
+        ],
+        [InlineKeyboardButton(texts.BTN_DCLOSE_DONE, callback_data="dclose:done")],
+        [InlineKeyboardButton(texts.BTN_FULL_REPORT, callback_data="menu:report")],
     ])
 
 
@@ -344,7 +367,7 @@ def category_picker(transaction_id: int, kind: str) -> InlineKeyboardMarkup:
 
 
 def ledger_settle_list(entries) -> InlineKeyboardMarkup | None:
-    """دکمه‌ی «تسویه شد» برای هر ردیفِ بازِ دفتر (حداکثر ۱۰ ردیف).
+    """دکمه‌ی «تسویه شد» + اسنوز برای هر ردیفِ بازِ دفتر (حداکثر ۱۰ ردیف).
 
     اگر ردیفی نباشد ``None`` برمی‌گرداند تا کیبوردِ خالی نفرستیم.
     """
@@ -356,6 +379,11 @@ def ledger_settle_list(entries) -> InlineKeyboardMarkup | None:
             f"{format_amount(e.amount, with_currency=False)}"
         )
         rows.append([InlineKeyboardButton(label, callback_data=f"ledger:settle:{e.id}")])
+        rows.append([
+            InlineKeyboardButton(texts.BTN_SNOOZE_TOMORROW, callback_data=f"snooze:{e.id}:tomorrow"),
+            InlineKeyboardButton(texts.BTN_SNOOZE_3DAYS, callback_data=f"snooze:{e.id}:3days"),
+            InlineKeyboardButton(texts.BTN_SNOOZE_WEEK, callback_data=f"snooze:{e.id}:week"),
+        ])
     return InlineKeyboardMarkup(rows) if rows else None
 
 
@@ -374,6 +402,15 @@ def invoice_void_confirm(invoice_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(texts.BTN_INVOICE_VOID_YES,
                              callback_data=f"invvoid:yes:{invoice_id}"),
         InlineKeyboardButton(texts.BTN_INVOICE_VOID_NO, callback_data="act:invoices"),
+    ]])
+
+
+def invoice_paid_confirm(invoice_id: int) -> InlineKeyboardMarkup:
+    """تغییرِ وضعیتِ مالی است؛ قبل از ثبت یک‌بار پرسیده می‌شود."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_INVOICE_PAID_YES,
+                             callback_data=f"invpaid:yes:{invoice_id}"),
+        InlineKeyboardButton(texts.BTN_INVOICE_PAID_NO, callback_data="act:invoices"),
     ]])
 
 
@@ -401,7 +438,7 @@ def invoice_history(invoices) -> InlineKeyboardMarkup | None:
         rows.append(row)
         if getattr(inv, "payment_status", "") != "paid":
             rows.append([InlineKeyboardButton(
-                texts.BTN_INVOICE_MARK_PAID, callback_data=f"invpaid:{inv.id}"
+                texts.BTN_INVOICE_MARK_PAID, callback_data=f"invpaid:ask:{inv.id}"
             )])
     return InlineKeyboardMarkup(rows) if rows else None
 

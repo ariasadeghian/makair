@@ -8,10 +8,11 @@ from collections import defaultdict
 from telegram.ext import ContextTypes
 
 from ..core import jalali, money
-from ..db.models import Direction
+from ..db.models import Direction, RetentionEventKind
 from ..services import backup as backup_service
 from ..services import ledger as ledger_service
 from ..services import reports as report_service
+from ..services import retention as retention_service
 from ..services import subscription as sub_service
 from . import keyboards, texts
 
@@ -74,6 +75,9 @@ async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
         by_user[entry.user_id].append(entry)
 
     for user_id, items in by_user.items():
+        user = store.get("users", user_id)
+        if user is not None and not getattr(user, "notify_due_reminders", True):
+            continue
         text = build_reminder_message(items, base)
         if not text:
             continue
@@ -85,6 +89,9 @@ async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             continue
+        await retention_service.log_event(
+            store, user_id, RetentionEventKind.DUE_REMINDER_SENT
+        )
 
 
 async def weekly_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -156,6 +163,8 @@ async def daily_summary_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await store.load_all_users()  # این job بین‌کاربری است
     now = jalali.now()
     for user in store.list("users", lambda u: True):
+        if not getattr(user, "notify_daily_close", True):
+            continue
         digest = report_service.build_daily_digest(store, user.id, now)
         if not digest:
             continue
@@ -166,6 +175,9 @@ async def daily_summary_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             continue
+        await retention_service.log_event(
+            store, user.id, RetentionEventKind.DAILY_CLOSE_SENT
+        )
 
 
 #: نام قدیمی — همان job است.

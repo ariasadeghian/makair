@@ -13,7 +13,9 @@ from statistics import median
 from typing import Optional
 
 from ..core import industries, jalali, money
+from ..db.models import RetentionEventKind
 from ..db.store import Store
+from . import retention as retention_service
 
 _EPOCH = dt.datetime(1970, 1, 1, tzinfo=jalali.TEHRAN)
 
@@ -86,12 +88,34 @@ def compute_pilot_metrics(store: Store, now: dt.datetime) -> dict:
     first_invoice_activated = sum(1 for u in users if getattr(u, "first_invoice_at", None))
     first_contact_activated = sum(1 for u in users if getattr(u, "first_contact_at", None))
 
+    # ماندگاری: جمع‌بندیِ آخر روز و تسویه‌های یادآوری‌محور، در ۷ روزِ اخیر.
+    window_start = now - dt.timedelta(days=7)
+    sent_users_7d = retention_service.distinct_users(
+        retention_service.events_since(
+            store, RetentionEventKind.DAILY_CLOSE_SENT, window_start, now
+        )
+    )
+    completed_users_7d = retention_service.distinct_users(
+        retention_service.events_since(
+            store, RetentionEventKind.DAILY_CLOSE_COMPLETED, window_start, now
+        )
+    )
+    daily_close_completion_rate = (
+        len(completed_users_7d) / len(sent_users_7d) if sent_users_7d else None
+    )
+    reminder_driven_settlements_7d = retention_service.reminder_driven_settlements(
+        store, window_start, now
+    )
+
     return {
         "total_users": len(users),
         "onboarding_started": onboarding_started,
         "activated": activated,
         "first_invoice_activated": first_invoice_activated,
         "first_contact_activated": first_contact_activated,
+        "daily_close_completed_users_7d": len(completed_users_7d),
+        "daily_close_completion_rate": daily_close_completion_rate,
+        "reminder_driven_settlements_7d": reminder_driven_settlements_7d,
         "by_industry": dict(by_industry),
         "fast_activation": fast_activation,
         "median_activation_secs": median(activation_secs) if activation_secs else None,
@@ -116,6 +140,12 @@ def _pct(part: int, whole: int) -> str:
     if whole <= 0:
         return "—"
     return money.to_persian_digits(str(round(100 * part / whole))) + "٪"
+
+
+def _pct_rate(rate: Optional[float]) -> str:
+    if rate is None:
+        return "—"
+    return money.to_persian_digits(str(round(100 * rate))) + "٪"
 
 
 def _fmt_duration(secs: Optional[float]) -> str:
@@ -170,6 +200,12 @@ def build_pilot_report(metrics: dict) -> str:
         "",
         f"📅 فعال امروز (DAU): {_fa(m.get('active_today', 0))}",
         f"🔥 فعال در ۷ روز اخیر: {_fa(m['active_last_7'])}",
+        "",
+        "🔁 <b>ماندگاری (۷ روزِ اخیر)</b>",
+        f"🌙 جمع‌بندیِ آخر روز را تمام کردند: {_fa(m.get('daily_close_completed_users_7d', 0))} کاربر",
+        f"📈 نرخِ تمام‌کردنِ جمع‌بندی: {_pct_rate(m.get('daily_close_completion_rate'))}",
+        f"💵 تسویه‌های احتمالاً یادآوری‌محور: {_fa(m.get('reminder_driven_settlements_7d', 0))} "
+        "<i>(هم‌زمانی با یک یادآوریِ فرستاده‌شده، نه اثباتِ علّیت)</i>",
         "",
         "📊 <b>استفاده از قابلیت‌ها</b> (چه چیزی واقعاً کار می‌کند)",
         f"• تراکنش: {_fa(u['transactions'])}",

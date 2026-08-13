@@ -280,3 +280,168 @@ class TestBuildLedgerReport:
         report = ledger.build_ledger_report(store, USER_ID)
         assert isinstance(report, str)
         assert "ثبت نشده" in report
+
+
+# --- اسنوزِ یادآوری (فاز ۱۹) -------------------------------------------------------
+
+
+class TestSnoozeOptions:
+    def test_returns_the_three_expected_offsets(self):
+        base = _dt(1403, 5, 10)
+        options = ledger.snooze_options(base)
+        assert options["tomorrow"] == _date(1403, 5, 11)
+        assert options["3days"] == _date(1403, 5, 13)
+        assert options["week"] == _date(1403, 5, 17)
+
+
+class TestSnoozeEntry:
+    async def test_tomorrow(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 10)
+        until = ledger.snooze_options(base)["tomorrow"]
+        updated = await ledger.snooze_entry(store, USER_ID, entry.id, until)
+        assert updated is not None
+        assert updated.snooze_until == _date(1403, 5, 11)
+
+    async def test_3days(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 10)
+        until = ledger.snooze_options(base)["3days"]
+        updated = await ledger.snooze_entry(store, USER_ID, entry.id, until)
+        assert updated.snooze_until == _date(1403, 5, 13)
+
+    async def test_week(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 10)
+        until = ledger.snooze_options(base)["week"]
+        updated = await ledger.snooze_entry(store, USER_ID, entry.id, until)
+        assert updated.snooze_until == _date(1403, 5, 17)
+
+    async def test_a_settled_item_cannot_be_snoozed(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        await ledger.settle(store, entry.id, USER_ID, _dt(1403, 5, 10))
+        result = await ledger.snooze_entry(store, USER_ID, entry.id, _date(1403, 5, 11))
+        assert result is None
+
+    async def test_another_users_entry_cannot_be_snoozed(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        result = await ledger.snooze_entry(
+            store, OTHER_USER_ID, entry.id, _date(1403, 5, 11)
+        )
+        assert result is None
+        # ردیفِ اصلی نباید دست بخورد.
+        untouched = store.get("ledger_entries", entry.id)
+        assert untouched.snooze_until is None
+
+    async def test_snoozing_never_touches_amount_direction_or_due_date(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.PAYABLE,
+            party_name="تأمین‌کننده", amount=750_000, due_date=_date(1403, 5, 10),
+        )
+        await ledger.snooze_entry(store, USER_ID, entry.id, _date(1403, 5, 20))
+        again = store.get("ledger_entries", entry.id)
+        assert again.amount == 750_000
+        assert again.direction == Direction.PAYABLE
+        assert again.due_date == _date(1403, 5, 10)
+
+    async def test_unknown_entry_returns_none(self, store):
+        assert await ledger.snooze_entry(store, USER_ID, 999_999, _date(1403, 5, 11)) is None
+
+
+class TestSnoozeExcludesFromReminders:
+    async def test_snoozed_entry_is_hidden_from_due_within(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 10)
+        await ledger.snooze_entry(store, USER_ID, entry.id, _date(1403, 5, 17))
+        assert entry.id not in [
+            e.id for e in ledger.due_within(store, USER_ID, 30, base)
+        ]
+
+    async def test_snoozed_entry_is_hidden_from_entries_due_for_reminder(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 10)
+        await ledger.snooze_entry(store, USER_ID, entry.id, _date(1403, 5, 17))
+        assert entry.id not in [
+            e.id for e in ledger.entries_due_for_reminder(store, base, lead_days=30)
+        ]
+
+    async def test_snoozed_entry_is_hidden_from_receivable_reminder_buckets(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 10)
+        await ledger.snooze_entry(store, USER_ID, entry.id, _date(1403, 5, 17))
+        buckets = ledger.receivable_reminder_buckets(store, USER_ID, base)
+        all_ids = {e.id for rows in buckets.values() for e in rows}
+        assert entry.id not in all_ids
+
+    async def test_snooze_expires_and_the_entry_reappears(self, store):
+        """این خودِ تستِ «انقضای اسنوز» است."""
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        await ledger.snooze_entry(store, USER_ID, entry.id, _date(1403, 5, 17))
+
+        # هنوز داخلِ بازه‌ی اسنوز — نباید باشد.
+        still_snoozed = _dt(1403, 5, 15)
+        assert entry.id not in [
+            e.id for e in ledger.due_within(store, USER_ID, 30, still_snoozed)
+        ]
+
+        # درست روزِ snooze_until — باید برگردد.
+        expired = _dt(1403, 5, 17)
+        assert entry.id in [
+            e.id for e in ledger.due_within(store, USER_ID, 30, expired)
+        ]
+
+        # بعد از snooze_until هم باید باشد.
+        after = _dt(1403, 5, 20)
+        assert entry.id in [
+            e.id for e in ledger.due_within(store, USER_ID, 30, after)
+        ]
+
+    async def test_settling_removes_it_from_reminders_regardless_of_snooze(self, store):
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 20)  # بعد از سررسید، بدونِ اسنوز
+        await ledger.settle(store, entry.id, USER_ID, base)
+        assert entry.id not in [
+            e.id for e in ledger.due_within(store, USER_ID, 30, base)
+        ]
+        assert entry.id not in [
+            e.id for e in ledger.entries_due_for_reminder(store, base, lead_days=30)
+        ]
+
+    async def test_a_never_snoozed_entry_is_unaffected(self, store):
+        """اطمینان از اینکه فیلترِ اسنوز چیزهای معمولی را قایم نمی‌کند."""
+        entry = await ledger.add_entry(
+            store, USER_ID, direction=Direction.RECEIVABLE,
+            party_name="علی", amount=500_000, due_date=_date(1403, 5, 10),
+        )
+        base = _dt(1403, 5, 10)
+        assert entry.id in [e.id for e in ledger.due_within(store, USER_ID, 30, base)]

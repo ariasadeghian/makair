@@ -131,7 +131,7 @@ def build_daily_digest(
     balance = stats["balance"]
     balance_emoji = "🟢" if balance >= 0 else "🔴"
     lines = [
-        f"🌙 <b>خلاصه‌ی امروز</b> ({jalali.format_date(stats['start'])})",
+        f"🌙 <b>جمع‌بندی امروز</b> ({jalali.format_date(stats['start'])})",
         "",
         f"💰 درآمد: {money.format_amount(stats['income'])}",
         f"💸 هزینه: {money.format_amount(stats['expense'])}",
@@ -152,7 +152,31 @@ def build_daily_digest(
             f"⏰ {money.to_persian_digits(str(stats['due_soon']))} مورد نزدیکِ سررسید "
             f"(تا {money.to_persian_digits(str(DUE_SOON_DAYS))} روز آینده)"
         )
+    lines.append("")
+    lines.append("چیزی امروز جا مانده؟")
     return "\n".join(lines)
+
+
+def daily_close_completed_today(user, now: dt.datetime) -> bool:
+    """آیا کاربر «✅ همه ثبت شده» را برای همینِ امروز زده؟"""
+    return user.last_daily_close_date is not None and user.last_daily_close_date == now.date()
+
+
+async def mark_daily_close_done(store: Store, user_id: int, now: dt.datetime) -> bool:
+    """امروز را «جمع‌بندی شد» علامت می‌زند؛ هیچ رکوردِ مالی نمی‌سازد.
+
+    ``True`` فقط بارِ اول برمی‌گرداند — زدنِ دوباره‌ی دکمه در همان روز
+    تغییری در داده نمی‌دهد (idempotent) و ``False`` می‌گیرد.
+    """
+    user = store.get("users", user_id)
+    if user is None:
+        return False
+    today = now.date()
+    if user.last_daily_close_date == today:
+        return False
+    user.last_daily_close_date = today
+    await store.update("users", user)
+    return True
 
 
 def _has_any_activity(store: Store, user_id: int) -> bool:

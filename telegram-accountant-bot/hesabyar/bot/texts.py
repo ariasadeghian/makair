@@ -23,6 +23,16 @@ MENU_ACCOUNT = "⭐ <b>اشتراک و پشتیبانی</b>"
 BTN_BACK_MAIN = "🔙 بازگشت به منوی اصلی"
 BTN_FULL_REPORT = "📊 گزارش کامل"
 
+# --- جمع‌بندیِ تعاملیِ آخر روز (Daily Close) ------------------------------------
+BTN_DCLOSE_INCOME = "➕ ثبت فروش"
+BTN_DCLOSE_EXPENSE = "➕ ثبت هزینه"
+BTN_DCLOSE_DONE = "✅ همه ثبت شده"
+DCLOSE_ASK_INCOME = "چی فروختی و چقدر؟ یک پیام بفرست، مثلاً «۵۰۰ هزار نقدی»."
+DCLOSE_ASK_EXPENSE = "چی خرج کردی و چقدر؟ یک پیام بفرست، مثلاً «۲۰۰ هزار خرید مواد»."
+DCLOSE_DONE_TOAST = "👍 دمت گرم! فردا می‌بینمت."
+DCLOSE_ALREADY_DONE_TOAST = "قبلاً برای امروز ثبت شده بود ✅"
+DCLOSE_GONE = "این جمع‌بندی دیگر معتبر نیست."
+
 # دکمه‌های داخل زیرمنوها
 BTN_M_EXPORT = "📥 خروجی اکسل"
 BTN_M_LIST = "🧾 فهرست تراکنش‌ها"
@@ -37,6 +47,17 @@ BTN_M_INDUSTRY = "🏷 نوع کسب‌وکار"
 BTN_M_BRANCHES = "🏬 شعبه‌ها"
 BTN_M_JOIN = "🔑 پیوستن به شعبه"
 BTN_M_LEAVE = "🚪 خروج از شعبه"
+BTN_M_NOTIFICATIONS = "🔔 اعلان‌ها"
+
+# --- تنظیمِ ترجیحاتِ اعلان -----------------------------------------------------
+NOTIF_PREFS_HEADER = (
+    "🔔 <b>اعلان‌ها</b>\n\n"
+    "روی هرکدام بزن تا روشن/خاموشش کنی. کاربرانِ فعلی همه‌چیز روشن دارند."
+)
+NOTIF_ON = "✅ روشن"
+NOTIF_OFF = "⛔️ خاموش"
+NOTIF_DAILY_CLOSE_LABEL = "🌙 جمع‌بندی آخر روز"
+NOTIF_DUE_REMINDERS_LABEL = "⏰ یادآوریِ سررسیدها"
 BTN_M_DOLLAR = "💵 نمای دلاری"
 BTN_M_RATE = "💱 نرخ دلار"
 BTN_M_PLANS = "⭐ پلن‌های اشتراک"
@@ -241,6 +262,12 @@ LEDGER_SETTLE_HINT = "\nبرای بستنِ هر مورد، روی «✅ تسو�
 LEDGER_SETTLED = "✅ تسویه شد: {party} — {amount}"
 LEDGER_SETTLE_GONE = "این مورد قبلاً تسویه یا حذف شده است."
 
+# --- اسنوزِ یادآوری -----------------------------------------------------------
+BTN_SNOOZE_TOMORROW = "⏰ فردا"
+BTN_SNOOZE_3DAYS = "⏰ ۳ روز دیگر"
+BTN_SNOOZE_WEEK = "⏰ هفته بعد"
+SNOOZE_DONE = "🔕 تا {date} یادآوری نمی‌کنم."
+
 # صورتحساب طرف‌حساب (برای فوروارد به بدهکار/بستانکار)
 BTN_PARTY_STATEMENT = "📄 صورتحساب یک نفر"
 STATEMENT_ASK_NAME = "نام طرف‌حساب را بنویسید تا صورتحسابش را برایتان بسازم:"
@@ -334,6 +361,9 @@ INVOICE_VOID_LABEL = "باطل"
 BTN_INVOICE_MARK_PAID = "✅ ثبت پرداخت"
 INVOICE_MARKED_PAID = "✅ فاکتور {number} پرداخت‌شده علامت خورد."
 INVOICE_PAID_GONE = "این فاکتور پیدا نشد یا باطل شده است."
+INVOICE_PAID_ASK = "فاکتور <b>{number}</b> به مبلغ <b>{amount}</b> پرداخت‌شده علامت بخورد؟"
+BTN_INVOICE_PAID_YES = "✅ تأیید"
+BTN_INVOICE_PAID_NO = "↩️ برگشت"
 
 INVOICE_ASK_DISCOUNT = "مبلغ تخفیف را بنویسید (یا «۰»):"
 INVOICE_ASK_SHIPPING = "هزینه‌ی ارسال را بنویسید (یا «۰»):"

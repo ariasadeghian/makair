@@ -109,13 +109,24 @@ class TestSettleKeyboard:
     def test_none_when_empty(self):
         assert keyboards.ledger_settle_list([]) is None
 
-    def test_caps_at_ten(self):
+    def test_caps_at_ten_entries(self):
+        """هر ردیف دو خط دارد (تسویه + اسنوز) — سقف روی تعدادِ ردیف‌هاست، نه سطر."""
         entries = [
             SimpleNamespace(id=i, party_name=f"ط{i}", amount=1000, is_cheque=False)
             for i in range(15)
         ]
         markup = keyboards.ledger_settle_list(entries)
-        assert len(markup.inline_keyboard) == 10
+        assert len(markup.inline_keyboard) == 20
+
+    def test_each_entry_offers_three_snooze_buttons(self):
+        entries = [
+            SimpleNamespace(id=1, party_name="رضا", amount=1000, is_cheque=False)
+        ]
+        markup = keyboards.ledger_settle_list(entries)
+        flat = [b.callback_data for row in markup.inline_keyboard for b in row]
+        assert "snooze:1:tomorrow" in flat
+        assert "snooze:1:3days" in flat
+        assert "snooze:1:week" in flat
 
 
 # --- تاریخچه‌ی فاکتور ----------------------------------------------------------

@@ -165,7 +165,7 @@ class TestDailyDigest:
         )
         digest = reports.build_daily_digest(store, UID, jalali.now())
         assert digest is not None
-        assert "خلاصه‌ی امروز" in digest
+        assert "جمع‌بندی امروز" in digest
         assert money.to_persian_digits("2") in digest or "۲" in digest
 
     async def test_inactive_user_none(self, store):

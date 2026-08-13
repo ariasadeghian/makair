@@ -94,6 +94,7 @@ class TestSubmenus:
             "search", "join", "newinvoice", "plans", "rate",
             "export", "list", "undo", "products", "invoices", "remind",
             "industry", "bizname", "branches", "leave", "dollar", "backup", "help",
+            "notifs",
         }
         assert actions <= handled, f"بدونِ هندلر: {actions - handled}"
 

@@ -98,6 +98,17 @@ def _pbool(value) -> bool:
     return value is True or str(value).strip().upper() == "TRUE"
 
 
+def _pbool_default_true(value) -> bool:
+    """مثلِ ``_pbool`` ولی برای فیلدهایی که پیش‌فرضشان روشن است.
+
+    سلولِ خالی/غایب (کاربرِ قدیمی که هنوز این ستون را ندارد) یعنی «هنوز
+    چیزی تنظیم نکرده» ⇒ ``True``؛ فقط مقدارِ صریحِ ``FALSE`` خاموشش می‌کند.
+    """
+    if value is None or str(value).strip() == "":
+        return True
+    return _pbool(value)
+
+
 def _pdt(value) -> Optional[dt.datetime]:
     if value is None or value == "":
         return None
@@ -126,6 +137,8 @@ class User:
         # نقاطِ عطفِ فعال‌سازی — برای قیفِ آنبردینگ و تحلیلِ محصول
         "onboarding_started_at", "first_transaction_at",
         "first_invoice_at", "first_contact_at",
+        # ترجیحاتِ اعلان + ردِ جمع‌بندیِ روزانه
+        "notify_daily_close", "notify_due_reminders", "last_daily_close_date",
     )
 
     id: Optional[int] = None
@@ -157,6 +170,11 @@ class User:
     first_transaction_at: Optional[dt.datetime] = None
     first_invoice_at: Optional[dt.datetime] = None
     first_contact_at: Optional[dt.datetime] = None
+    #: --- ترجیحاتِ اعلان — پیش‌فرض روشن، تا رفتارِ فعلی بعد از دیپلوی عوض نشود ---
+    notify_daily_close: bool = True
+    notify_due_reminders: bool = True
+    #: آخرین روزی که «همه ثبت شده» را زده (برای idempotency و سنجه‌های ماندگاری)
+    last_daily_close_date: Optional[dt.date] = None
 
     def to_row(self) -> list:
         return [
@@ -169,6 +187,8 @@ class User:
             _s(self.logo_file_id), _s(self.stamp_file_id),
             _s(self.onboarding_started_at), _s(self.first_transaction_at),
             _s(self.first_invoice_at), _s(self.first_contact_at),
+            _s(self.notify_daily_close), _s(self.notify_due_reminders),
+            _s(self.last_daily_close_date),
         ]
 
     @classmethod
@@ -198,6 +218,10 @@ class User:
             first_transaction_at=_pdt(d.get("first_transaction_at")),
             first_invoice_at=_pdt(d.get("first_invoice_at")),
             first_contact_at=_pdt(d.get("first_contact_at")),
+            # ردیف‌های قدیمی این ستون‌ها را ندارند ⇒ روشن (رفتارِ فعلی حفظ می‌شود)
+            notify_daily_close=_pbool_default_true(d.get("notify_daily_close")),
+            notify_due_reminders=_pbool_default_true(d.get("notify_due_reminders")),
+            last_daily_close_date=_pdate(d.get("last_daily_close_date")),
         )
 
 
@@ -251,7 +275,7 @@ class LedgerEntry:
     COLUMNS = (
         "id", "user_id", "direction", "party_name", "amount",
         "description", "due_date", "is_settled", "settled_at", "created_at",
-        "instrument", "cheque_no", "party_tg_id", "customer_id",
+        "instrument", "cheque_no", "party_tg_id", "customer_id", "snooze_until",
     )
 
     id: Optional[int] = None
@@ -271,6 +295,9 @@ class LedgerEntry:
     party_tg_id: Optional[int] = None
     #: لینک به رکورد مشتری (party_name برای نمایش/سازگاری می‌ماند)
     customer_id: Optional[int] = None
+    #: تا این تاریخ در یادآوریِ خودکار نشان داده نشود («⏰ فردا/۳روزدیگر/هفته‌ی
+    #: بعد» زیرِ یادآوری). مبلغ/جهت/سررسید را عوض نمی‌کند — فقط نمایش را.
+    snooze_until: Optional[dt.date] = None
 
     @property
     def is_cheque(self) -> bool:
@@ -282,7 +309,7 @@ class LedgerEntry:
             _s(self.amount), _s(self.description), _s(self.due_date),
             _s(self.is_settled), _s(self.settled_at), _s(self.created_at),
             _s(self.instrument), _s(self.cheque_no), _s(self.party_tg_id),
-            _s(self.customer_id),
+            _s(self.customer_id), _s(self.snooze_until),
         ]
 
     @classmethod
@@ -302,6 +329,7 @@ class LedgerEntry:
             cheque_no=_pstr(d.get("cheque_no")),
             party_tg_id=_pint(d.get("party_tg_id")),
             customer_id=_pint(d.get("customer_id")),
+            snooze_until=_pdate(d.get("snooze_until")),
         )
 
 
@@ -638,6 +666,48 @@ class GroupEvent:
         )
 
 
+class RetentionEventKind:
+    """نامِ رویدادهای ماندگاری — فقط برای شمارش در ``/pilot``، جای رکوردِ مالی
+    را نمی‌گیرند."""
+
+    DAILY_CLOSE_SENT = "daily_close_sent"
+    DAILY_CLOSE_COMPLETED = "daily_close_completed"
+    DUE_REMINDER_SENT = "due_reminder_sent"
+    LEDGER_SETTLED = "ledger_settled"
+
+
+@dataclass
+class RetentionEvent:
+    """رویدادِ سبکِ ماندگاری (نه یک سکوی آنالیتیکسِ جدا — فقط شمارشِ چندتا
+    رخداد برای ``/pilot``). حذف نمی‌شود، فقط اضافه می‌شود."""
+
+    TABLE = "retention_events"
+    COLUMNS = ("id", "user_id", "kind", "created_at", "meta")
+
+    id: Optional[int] = None
+    user_id: int = 0
+    kind: str = ""
+    created_at: Optional[dt.datetime] = None
+    #: زمینه‌ی کوتاهِ اختیاری (مثلاً شناسه‌ی ردیفِ دفتر برایِ ledger_settled)
+    meta: str = ""
+
+    def to_row(self) -> list:
+        return [
+            _s(self.id), _s(self.user_id), _s(self.kind), _s(self.created_at),
+            _s(self.meta),
+        ]
+
+    @classmethod
+    def from_row(cls, d: dict) -> "RetentionEvent":
+        return cls(
+            id=_pint(d.get("id")),
+            user_id=_pint(d.get("user_id")) or 0,
+            kind=_pstr(d.get("kind")),
+            created_at=_pdt(d.get("created_at")),
+            meta=_pstr(d.get("meta")),
+        )
+
+
 @dataclass
 class Rate:
     """نرخ دلار در یک روز (تومان به ازای هر دلار).
@@ -806,6 +876,7 @@ CENTRAL_MODELS = (User, Subscription, Payment, Rate, Branch, BranchMember, Seque
 #: جدول‌های اسپردشیتِ **اختصاصیِ هر کاربر** — دفترِ واقعیِ کسب‌وکار.
 USER_MODELS = (
     Transaction, LedgerEntry, Invoice, InvoiceItem, Product, GroupEvent, Customer,
+    RetentionEvent,
 )
 
 #: همه‌ی مدل‌ها (برای سازگاری و ابزارهای عمومی).
@@ -824,4 +895,5 @@ OWNER_FIELD = {
     "products": "user_id",
     "group_events": "chat_id",
     "customers": "user_id",
+    "retention_events": "user_id",
 }

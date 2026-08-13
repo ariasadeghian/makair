@@ -30,7 +30,7 @@ from ..core import (
 )
 from ..db.models import (
     Direction, GroupEventKind, Instrument, Invoice, InvoiceItem, Kind,
-    PaymentStatus,
+    PaymentStatus, RetentionEventKind,
 )
 from ..pdf.invoice_pdf import (
     render_invoice_image,
@@ -54,6 +54,7 @@ from ..services import pilot as pilot_service
 from ..services import branches as branch_service
 from ..services import products as products_service
 from ..services import rates as rates_service
+from ..services import retention as retention_service
 from ..services import stt as stt_service
 from ..services import reports as report_service
 from ..services import subscription as sub_service
@@ -541,6 +542,10 @@ async def _route_text(
         return await _handle_ledger_flow(update, context, text, flow)
     if flow == "statement_party":
         return await _handle_statement(update, context, text)
+    if flow in ("dc_income", "dc_expense"):
+        _clear_flow(context)
+        forced_kind = Kind.INCOME if flow == "dc_income" else Kind.EXPENSE
+        return await _log_transaction(update, context, text, forced_kind=forced_kind)
     if flow == "branch_name":
         return await _handle_branch_flow(update, context, text)
     if flow == "seller_field":
@@ -734,6 +739,41 @@ async def bizname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(body, parse_mode="HTML", reply_markup=markup)
 
 
+async def notif_prefs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """صفحه‌ی «🔔 اعلان‌ها»."""
+    _clear_flow(context)
+    uid = update.effective_user.id
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        markup = keyboards.notification_prefs(user)
+    await update.message.reply_text(
+        texts.NOTIF_PREFS_HEADER, parse_mode="HTML", reply_markup=markup
+    )
+
+
+_NOTIF_FIELDS = {
+    "daily_close": "notify_daily_close",
+    "due_reminders": "notify_due_reminders",
+}
+
+
+async def on_notification_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های «🔔 اعلان‌ها»: هر لمس، همان ترجیح را برعکس می‌کند."""
+    query = update.callback_query
+    key = query.data.split(":", 1)[1]
+    field = _NOTIF_FIELDS.get(key)
+    if field is None:
+        return await query.answer()
+    uid = update.effective_user.id
+    with _session(context) as session:
+        user = await tx_service.get_or_create_user(session, uid)
+        setattr(user, field, not getattr(user, field))
+        await session.update("users", user)
+        markup = keyboards.notification_prefs(user)
+    await query.answer()
+    await _safe_edit_html(query, texts.NOTIF_PREFS_HEADER, reply_markup=markup)
+
+
 async def _ask_seller_field(update, context, field) -> None:
     context.user_data["flow"] = "seller_field"
     context.user_data["seller_field"] = field.key
@@ -883,11 +923,21 @@ async def _not_understood(update, context, text: str) -> None:
     )
 
 
-async def _log_transaction(update, context, text: str) -> None:
+async def _log_transaction(
+    update, context, text: str, forced_kind: str | None = None
+) -> None:
+    """یک تراکنش از روی متن ثبت می‌کند.
+
+    ``forced_kind`` وقتی پر می‌شود که ورودی از یک دکمه‌ی مشخص آمده باشد (مثلاً
+    «➕ ثبت فروش» در جمع‌بندیِ آخر روز) — نوع را از تشخیصِ کلیدواژه‌ای مستقل
+    می‌کند تا مبهم بودنِ متن باعثِ ثبتِ اشتباه (هزینه به‌جای فروش) نشود.
+    """
     settings = context.application.bot_data["settings"]
     parsed = await extract_service.extract_transaction(settings, text, base=jalali.now())
     if parsed is None:
         return await _not_understood(update, context, text)
+    if forced_kind is not None:
+        parsed.kind = forced_kind
     actor = update.effective_user.id
     with _session(context) as session:
         # اگر کارمندِ شعبه است، ثبت در دفترِ صاحب کسب‌وکار با برچسبِ شعبه
@@ -943,6 +993,61 @@ async def on_report_period(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return await query.edit_message_text(snapshot, parse_mode="HTML")
         report = report_service.build_report(session, uid, jalali.now(), period)
     await query.edit_message_text(report)
+
+
+async def on_ledger_snooze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های «⏰ فردا/۳روزدیگر/هفته‌ی‌بعد» زیرِ یادآوریِ خودکار."""
+    query = update.callback_query
+    parts = query.data.split(":")  # snooze:{entry_id}:{key}
+    try:
+        entry_id = int(parts[1])
+    except (IndexError, ValueError):
+        return await query.answer()
+    key = parts[2] if len(parts) > 2 else ""
+    options = ledger_service.snooze_options(jalali.now())
+    until = options.get(key)
+    if until is None:
+        return await query.answer()
+    uid = update.effective_user.id
+    with _session(context) as session:
+        updated = await ledger_service.snooze_entry(session, uid, entry_id, until)
+    if updated is None:
+        return await query.answer(texts.LEDGER_SETTLE_GONE, show_alert=True)
+    await query.answer(texts.SNOOZE_DONE.format(date=jalali.format_date(until)))
+
+
+async def on_daily_close_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """دکمه‌های زیرِ جمع‌بندیِ آخر روز: ثبتِ سریعِ فروش/هزینه، یا تأییدِ تمام‌شدن."""
+    query = update.callback_query
+    action = query.data.split(":", 1)[1]
+    uid = update.effective_user.id
+
+    if action == "income":
+        await query.answer()
+        context.user_data["flow"] = "dc_income"
+        return await query.message.reply_text(
+            texts.DCLOSE_ASK_INCOME, reply_markup=keyboards.cancel_only()
+        )
+
+    if action == "expense":
+        await query.answer()
+        context.user_data["flow"] = "dc_expense"
+        return await query.message.reply_text(
+            texts.DCLOSE_ASK_EXPENSE, reply_markup=keyboards.cancel_only()
+        )
+
+    if action == "done":
+        with _session(context) as session:
+            was_first = await report_service.mark_daily_close_done(
+                session, uid, jalali.now()
+            )
+            if was_first:
+                await retention_service.log_event(
+                    session, uid, RetentionEventKind.DAILY_CLOSE_COMPLETED
+                )
+        if was_first:
+            return await query.answer(texts.DCLOSE_DONE_TOAST)
+        return await query.answer(texts.DCLOSE_ALREADY_DONE_TOAST)
 
 
 # --- دفتر طلب و بدهی ----------------------------------------------------------
@@ -1733,24 +1838,43 @@ async def on_invoice_void(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def on_invoice_paid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """✅ در تاریخچه: کل فاکتور را یک‌لمسی «پرداخت‌شده» می‌کند (بدون نیاز به تأیید)."""
+    """✅ در تاریخچه: پرسیدن و بعد «پرداخت‌شده» — یک لمس هیچ مبلغی را جابه‌جا نمی‌کند."""
     query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":")  # invpaid:action:id
+    action = parts[1] if len(parts) > 1 else ""
     try:
-        invoice_id = int(query.data.split(":")[1])
+        invoice_id = int(parts[2])
     except (IndexError, ValueError):
-        return await query.answer()
+        return
     uid = update.effective_user.id
-    with _session(context) as session:
-        invoice = await invoice_service.mark_fully_paid(session, uid, invoice_id)
-        if invoice is not None:
-            await session.flush()  # سندِ مالی، فوری روی شیت
-        invoices = invoice_service.list_invoices(session, uid, limit=10)
-    if invoice is None:
-        return await query.answer(texts.INVOICE_PAID_GONE, show_alert=True)
-    await query.answer(texts.INVOICE_MARKED_PAID.format(number=invoice.number))
-    await _safe_edit(
-        query, texts.INVOICE_LIST_HEADER, reply_markup=keyboards.invoice_history(invoices)
-    )
+
+    if action == "ask":
+        with _session(context) as session:
+            invoice = invoice_service.get_invoice(session, invoice_id, uid)
+        if invoice is None or invoice.is_void:
+            return await _safe_edit(query, texts.INVOICE_PAID_GONE)
+        return await _safe_edit_html(
+            query,
+            texts.INVOICE_PAID_ASK.format(
+                number=invoice.number, amount=money.format_amount(invoice.total)
+            ),
+            reply_markup=keyboards.invoice_paid_confirm(invoice_id),
+        )
+
+    if action == "yes":
+        with _session(context) as session:
+            invoice = await invoice_service.mark_fully_paid(session, uid, invoice_id)
+            if invoice is not None:
+                await session.flush()  # سندِ مالی، فوری روی شیت
+            invoices = invoice_service.list_invoices(session, uid, limit=10)
+        if invoice is None:
+            return await _safe_edit(query, texts.INVOICE_PAID_GONE)
+        await _safe_edit(query, texts.INVOICE_MARKED_PAID.format(number=invoice.number))
+        return await query.message.reply_text(
+            texts.INVOICE_LIST_HEADER,
+            reply_markup=keyboards.invoice_history(invoices),
+        )
 
 
 async def _finalize_invoice(update, context) -> None:
@@ -2996,6 +3120,7 @@ async def on_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "remind": remind_cmd,
         "industry": industry_cmd,
         "bizname": bizname_cmd,
+        "notifs": notif_prefs_cmd,
         "branches": branches_cmd,
         "leave": leave_cmd,
         "dollar": dollar_cmd,
@@ -3275,6 +3400,13 @@ def register(application: Application) -> None:
         CallbackQueryHandler(on_flow_cancel, pattern=r"^flow:cancel$")
     )
     application.add_handler(CallbackQueryHandler(on_report_period, pattern=r"^report:"))
+    application.add_handler(
+        CallbackQueryHandler(on_daily_close_action, pattern=r"^dclose:")
+    )
+    application.add_handler(CallbackQueryHandler(on_ledger_snooze, pattern=r"^snooze:"))
+    application.add_handler(
+        CallbackQueryHandler(on_notification_toggle, pattern=r"^notif:")
+    )
     application.add_handler(CallbackQueryHandler(on_dashboard, pattern=r"^dash:"))
     application.add_handler(CallbackQueryHandler(on_ledger_action, pattern=r"^ledger:"))
     application.add_handler(CallbackQueryHandler(on_subscription, pattern=r"^sub:"))

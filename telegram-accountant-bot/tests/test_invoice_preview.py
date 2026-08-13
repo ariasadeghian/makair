@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from hesabyar.bot import handlers, keyboards, texts
 from hesabyar.config import Settings
-from hesabyar.core import jalali
+from hesabyar.core import jalali, money
 from hesabyar.db.models import Invoice, InvoiceStatus
 from hesabyar.services import customers as customers_service
 from hesabyar.services import invoices as invoice_service
@@ -126,6 +126,13 @@ async def _press(ctx, data, message=None):
         handler = handlers.on_invoice_action
     await handler(_update(query=query), ctx)
     return query
+
+
+async def _type(ctx, text):
+    """کاربر یک پیامِ متنی می‌فرستد — همان مسیرِ واقعیِ تلگرام (``on_text``)."""
+    msg = _Msg(text)
+    await handlers.on_text(_update(message=msg), ctx)
+    return msg
 
 
 # --- پیش‌نمایش --------------------------------------------------------------------
@@ -281,6 +288,58 @@ async def _issued(store, ctx, customer="رضا"):
     return store.list("invoices")[-1]
 
 
+class TestManualBuilderPriceParsing:
+    """رگرسیونِ «صندلی ۳ عدد ۷۵۰۰۰۰» از مسیرِ واقعیِ ویزاردِ دستی.
+
+    عمداً ``core.invoice_nlp._parse_item`` را مستقیم صدا نمی‌زند — از
+    ``on_text`` رد می‌شود، دقیقاً همان چیزی که کاربرِ تلگرام موقعِ ساختن
+    فاکتور با «➕ فاکتور جدید» تایپ می‌کند. پارسرش هم جدا از
+    ``core.invoice_nlp`` است (``handlers._parse_item``/``_parse_item_free``).
+    """
+
+    async def test_counter_word_does_not_confuse_the_manual_builder(self, store):
+        ctx = _ctx(store)
+        await _ready(store, ctx, items=[])
+
+        await _type(ctx, "صندلی ۳ عدد ۷۵۰۰۰۰")
+
+        item = ctx.user_data["invoice"]["items"][-1]
+        assert item["title"] == "صندلی"
+        assert item["quantity"] == 3
+        assert item["unit_price"] == 750_000
+
+    async def test_the_persisted_invoice_item_has_the_right_numbers(self, store):
+        """همان ورودی، ولی تا آخرِ مسیر: صدور واقعی + خواندنِ سندِ ذخیره‌شده."""
+        ctx = _ctx(store)
+        await _ready(store, ctx, items=[])
+        await _type(ctx, "صندلی ۳ عدد ۷۵۰۰۰۰")
+
+        await _press(ctx, "inv:done")
+        await _press(ctx, "invdraft:issue")
+
+        invoice = store.list("invoices")[-1]
+        saved_items = store.list(
+            "invoice_items", lambda it: it.invoice_id == invoice.id
+        )
+        assert len(saved_items) == 1
+        item = saved_items[0]
+        assert item.title == "صندلی"
+        assert item.quantity == 3
+        assert item.unit_price == 750_000
+        assert item.line_total == 2_250_000
+
+    async def test_a_second_regression_input_from_the_same_ticket(self, store):
+        """«میز ۲ عدد ۳۰۰۰۰۰» — نمونه‌ی دومِ همان تیکتِ اصلی، از همین مسیر."""
+        ctx = _ctx(store)
+        await _ready(store, ctx, items=[])
+        await _type(ctx, "میز ۲ عدد ۳۰۰۰۰۰")
+
+        item = ctx.user_data["invoice"]["items"][-1]
+        assert item["title"] == "میز"
+        assert item["quantity"] == 2
+        assert item["unit_price"] == 300_000
+
+
 class TestVoiding:
     async def test_service_marks_it_void_without_deleting(self, store):
         ctx = _ctx(store)
@@ -394,7 +453,7 @@ class TestVoidFromTheHistory:
         markup = keyboards.invoice_history([store.get("invoices", invoice.id)])
         # فاکتورِ تازه‌صادرشده هنوز پرداخت نشده ⇒ دکمه‌ی «ثبت پرداخت» هم دارد.
         assert _cb(markup) == [
-            f"invh:{invoice.id}", f"invvoid:ask:{invoice.id}", f"invpaid:{invoice.id}"
+            f"invh:{invoice.id}", f"invvoid:ask:{invoice.id}", f"invpaid:ask:{invoice.id}"
         ]
 
     async def test_a_voided_invoice_is_marked_and_loses_its_button(self, store):
@@ -441,41 +500,63 @@ class TestVoidFromTheHistory:
 
 
 class TestMarkPaidFromTheHistory:
+    """امن‌سازیِ مالی: یک لمس هیچ مبلغی را جابه‌جا نمی‌کند — اول می‌پرسد."""
+
     async def test_a_fresh_invoice_offers_the_mark_paid_button(self, store):
         ctx = _ctx(store)
         invoice = await _issued(store, ctx)
         markup = keyboards.invoice_history([store.get("invoices", invoice.id)])
-        assert f"invpaid:{invoice.id}" in _cb(markup)
+        assert f"invpaid:ask:{invoice.id}" in _cb(markup)
 
-    async def test_tapping_it_marks_the_invoice_fully_paid(self, store):
+    async def test_tapping_it_only_asks_and_does_not_mutate(self, store):
         ctx = _ctx(store)
         invoice = await _issued(store, ctx)
-        query = await _press(ctx, f"invpaid:{invoice.id}")
+        query = await _press(ctx, f"invpaid:ask:{invoice.id}")
+
+        stored = store.get("invoices", invoice.id)
+        assert stored.payment_status == "unpaid", "هنوز نباید پرداخت‌شده علامت بخورد"
+        assert stored.paid_amount == 0
+        assert invoice.number in query.edits[-1]["text"]
+        assert money.format_amount(invoice.total) in query.edits[-1]["text"]
+        assert _cb(query.edits[-1]["reply_markup"]) == [
+            f"invpaid:yes:{invoice.id}", "act:invoices"
+        ]
+
+    async def test_confirming_marks_it_paid_and_reshows_the_list(self, store):
+        ctx = _ctx(store)
+        invoice = await _issued(store, ctx)
+        query = await _press(ctx, f"invpaid:yes:{invoice.id}")
 
         stored = store.get("invoices", invoice.id)
         assert stored.payment_status == "paid"
         assert stored.paid_amount == stored.total
-        # لیست به‌روزشده جای پیام قبلی می‌نشیند و دیگر دکمه‌ی «ثبت پرداخت» ندارد.
-        assert query.edits[-1]["text"] == texts.INVOICE_LIST_HEADER
-        assert f"invpaid:{invoice.id}" not in _cb(query.edits[-1]["reply_markup"])
+        assert invoice.number in query.edits[-1]["text"]
+        # لیستِ به‌روزشده به‌عنوانِ پیامِ تازه می‌آید و دیگر دکمه‌ی «ثبت پرداخت» ندارد.
+        assert "invh:" in " ".join(_cb(query.message.markup))
+        assert f"invpaid:ask:{invoice.id}" not in _cb(query.message.markup)
 
     async def test_a_paid_invoice_loses_the_mark_paid_button(self, store):
         ctx = _ctx(store)
         invoice = await _issued(store, ctx)
-        await _press(ctx, f"invpaid:{invoice.id}")
+        await _press(ctx, f"invpaid:yes:{invoice.id}")
         markup = keyboards.invoice_history([store.get("invoices", invoice.id)])
-        assert f"invpaid:{invoice.id}" not in _cb(markup)
+        assert f"invpaid:ask:{invoice.id}" not in _cb(markup)
         label = markup.inline_keyboard[0][0].text
         assert "✅" in label
 
-    async def test_marking_an_unknown_invoice_does_not_crash(self, store):
+    async def test_asking_about_an_unknown_invoice(self, store):
         ctx = _ctx(store)
-        query = await _press(ctx, "invpaid:999999")
-        assert query.edits == []  # چیزی برای ویرایش نبود، فقط پیامِ toast رفت
+        query = await _press(ctx, "invpaid:ask:999999")
+        assert query.edits[-1]["text"] == texts.INVOICE_PAID_GONE
+
+    async def test_confirming_an_unknown_invoice_does_not_crash(self, store):
+        ctx = _ctx(store)
+        query = await _press(ctx, "invpaid:yes:999999")
+        assert query.edits[-1]["text"] == texts.INVOICE_PAID_GONE
 
     async def test_bad_callback_data_is_ignored(self, store):
         ctx = _ctx(store)
-        query = await _press(ctx, "invpaid:xyz")
+        query = await _press(ctx, "invpaid:ask:xyz")
         assert query.edits == []
 
 

@@ -5,9 +5,9 @@ import datetime as dt
 from typing import Optional
 
 from ..core import jalali, money
-from ..db.models import Direction, Instrument, LedgerEntry
+from ..db.models import Direction, Instrument, LedgerEntry, RetentionEventKind
 from ..db.store import Store
-from . import customers
+from . import customers, retention
 from .transactions import get_or_create_user
 
 
@@ -68,6 +68,9 @@ async def settle(
     entry.is_settled = True
     entry.settled_at = when
     await store.update("ledger_entries", entry)
+    await retention.log_event(
+        store, user_id, RetentionEventKind.LEDGER_SETTLED, meta=str(entry_id)
+    )
     return entry
 
 
@@ -83,14 +86,21 @@ def totals(store: Store, user_id: int) -> dict:
     return {"receivable": receivable, "payable": payable, "net": receivable - payable}
 
 
+def _not_snoozed(entry: LedgerEntry, today: dt.date) -> bool:
+    """آیا این ردیف الان اسنوز نیست (یا اسنوزش تمام شده)؟"""
+    return entry.snooze_until is None or entry.snooze_until <= today
+
+
 def due_within(
     store: Store, user_id: int, days: int, base: dt.datetime
 ) -> list[LedgerEntry]:
     limit = base.date() + dt.timedelta(days=days)
+    today = base.date()
     rows = store.list(
         "ledger_entries",
         lambda e: e.user_id == user_id and not e.is_settled
-        and e.due_date is not None and e.due_date <= limit,
+        and e.due_date is not None and e.due_date <= limit
+        and _not_snoozed(e, today),
     )
     return sorted(rows, key=_due_key)
 
@@ -101,16 +111,45 @@ def entries_due_for_reminder(
     """ردیف‌های بازِ سررسیدشده و نزدیک‌به‌سررسید (تا ``lead_days`` روز آینده).
 
     با ``lead_days=0`` فقط معوق‌ها و سررسیدِ امروز برمی‌گردند (رفتار پیشین).
-    خروجی بر اساس تاریخ سررسید مرتب است (نزدیک‌تر اول).
+    ردیفِ اسنوزشده تا وقتی ``snooze_until``ش نرسیده برنمی‌گردد. خروجی بر
+    اساس تاریخ سررسید مرتب است (نزدیک‌تر اول).
     """
     horizon = base.date() + dt.timedelta(days=max(0, lead_days))
+    today = base.date()
     rows = store.list(
         "ledger_entries",
         lambda e: not e.is_settled
         and e.due_date is not None
-        and e.due_date <= horizon,
+        and e.due_date <= horizon
+        and _not_snoozed(e, today),
     )
     return sorted(rows, key=_due_key)
+
+
+def snooze_options(base: dt.datetime) -> dict:
+    """سه گزینه‌ی آماده‌ی اسنوز: فردا / ۳ روز دیگر / هفته‌ی بعد."""
+    today = base.date()
+    return {
+        "tomorrow": today + dt.timedelta(days=1),
+        "3days": today + dt.timedelta(days=3),
+        "week": today + dt.timedelta(days=7),
+    }
+
+
+async def snooze_entry(
+    store: Store, user_id: int, entry_id: int, until: dt.date
+) -> Optional[LedgerEntry]:
+    """این ردیف را تا ``until`` از یادآوریِ خودکار کنار می‌گذارد.
+
+    مبلغ/جهت/سررسید را عوض نمی‌کند — فقط اینکه در یادآوری نشان داده شود یا
+    نه. مالکیت چک می‌شود؛ ردیفِ تسویه‌شده یا متعلق‌به‌کسِ‌دیگر ``None`` می‌دهد.
+    """
+    entry = store.get("ledger_entries", entry_id)
+    if entry is None or entry.user_id != user_id or entry.is_settled:
+        return None
+    entry.snooze_until = until
+    await store.update("ledger_entries", entry)
+    return entry
 
 
 def due_bucket(entry: LedgerEntry, base: dt.datetime) -> str:

@@ -305,6 +305,26 @@ class TestEveryFlowIsCancellable:
         assert "flow" not in ctx.user_data
         assert store.list("branches") == []
 
+    async def test_daily_close_income(self, store):
+        ctx = _ctx(store)
+        query = _Query("dclose:income")
+        await handlers.on_daily_close_action(_update(query=query), ctx)
+        assert ctx.user_data["flow"] == "dc_income"
+        assert CANCEL in _cb(query.message.markup)
+        await _press_cancel(ctx)
+        assert "flow" not in ctx.user_data
+        assert store.list("transactions") == []
+
+    async def test_daily_close_expense(self, store):
+        ctx = _ctx(store)
+        query = _Query("dclose:expense")
+        await handlers.on_daily_close_action(_update(query=query), ctx)
+        assert ctx.user_data["flow"] == "dc_expense"
+        assert CANCEL in _cb(query.message.markup)
+        await _press_cancel(ctx)
+        assert "flow" not in ctx.user_data
+        assert store.list("transactions") == []
+
     async def test_invoice_from_customer_to_items(self, store):
         ctx = _ctx(store)
         await tx.get_or_create_user(store, UID)
@@ -427,6 +447,7 @@ COVERED_FLOWS = {
     "prod_name", "prod_category", "prod_newcat", "prod_price",
     "payment_reference", "edit_amount",
     "search_query", "join_code",
+    "dc_income", "dc_expense",
 }
 
 

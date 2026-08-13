@@ -4,11 +4,15 @@
 می‌شوند.
 """
 import datetime as dt
+from types import SimpleNamespace
 
+from hesabyar.bot import reminders
 from hesabyar.bot.reminders import build_reminder_message
+from hesabyar.config import Settings
 from hesabyar.core import jalali
-from hesabyar.db.models import Direction
+from hesabyar.db.models import Direction, RetentionEventKind
 from hesabyar.services import ledger as ledger_service
+from hesabyar.services import transactions as tx
 
 UID = 707
 
@@ -96,3 +100,62 @@ async def test_receivable_reminder_buckets_empty_when_nothing_due(store):
                 Direction.RECEIVABLE)
     buckets = ledger_service.receivable_reminder_buckets(store, UID, jalali.now())
     assert buckets == {"overdue": [], "today": [], "upcoming": []}
+
+
+# --- job سراسریِ send_due_reminders (بدون شبکه) -----------------------------------
+
+
+class _Bot:
+    def __init__(self):
+        self.sent: list = []
+
+    async def send_message(self, chat_id, text=None, **kw):
+        self.sent.append({"chat_id": chat_id, "text": text, **kw})
+
+
+def _ctx(store, bot=None):
+    app = SimpleNamespace(
+        bot_data={"store": store, "settings": Settings(bot_token="x")},
+        bot=bot or _Bot(),
+    )
+    return SimpleNamespace(application=app, bot=app.bot)
+
+
+class TestSendDueRemindersJob:
+    async def test_sends_and_logs_an_event_when_something_is_due(self, store):
+        await _seed(store, "علی", 500_000, jalali.now().date(), Direction.RECEIVABLE)
+        ctx = _ctx(store)
+        await reminders.send_due_reminders(ctx)
+
+        assert len(ctx.bot.sent) == 1
+        assert ctx.bot.sent[0]["chat_id"] == UID
+        events = store.list(
+            "retention_events",
+            lambda e: e.user_id == UID and e.kind == RetentionEventKind.DUE_REMINDER_SENT,
+        )
+        assert len(events) == 1
+
+    async def test_nothing_due_sends_nothing(self, store):
+        await tx.get_or_create_user(store, UID)
+        ctx = _ctx(store)
+        await reminders.send_due_reminders(ctx)
+        assert ctx.bot.sent == []
+
+    async def test_preference_off_skips_the_message_and_the_event(self, store):
+        await _seed(store, "علی", 500_000, jalali.now().date(), Direction.RECEIVABLE)
+        user = store.get("users", UID)
+        user.notify_due_reminders = False
+        await store.update("users", user)
+
+        ctx = _ctx(store)
+        await reminders.send_due_reminders(ctx)
+        assert ctx.bot.sent == []
+        assert store.list(
+            "retention_events", lambda e: e.kind == RetentionEventKind.DUE_REMINDER_SENT
+        ) == []
+
+    async def test_default_preference_is_on(self, store):
+        await _seed(store, "علی", 500_000, jalali.now().date(), Direction.RECEIVABLE)
+        ctx = _ctx(store)
+        await reminders.send_due_reminders(ctx)
+        assert len(ctx.bot.sent) == 1

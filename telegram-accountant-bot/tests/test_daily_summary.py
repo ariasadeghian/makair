@@ -181,13 +181,19 @@ class TestJob:
         await reminders.daily_summary_job(ctx)
         assert ctx.bot.sent == []
 
-    async def test_message_carries_the_full_report_button(self, store):
+    async def test_message_carries_the_daily_close_buttons(self, store):
+        """جمع‌بندیِ آخر روز تعاملی است: ثبتِ سریع + تأییدِ تمام‌شدن + گزارشِ کامل."""
         await _earn(store, ACTIVE, 1_000_000)
         ctx = _ctx(store)
         await reminders.daily_summary_job(ctx)
         markup = ctx.bot.sent[0]["reply_markup"]
-        assert _cb(markup) == ["menu:report"]
-        assert markup.inline_keyboard[0][0].text == texts.BTN_FULL_REPORT
+        assert _cb(markup) == ["dclose:income", "dclose:expense", "dclose:done", "menu:report"]
+
+    async def test_message_ends_with_the_daily_close_question(self, store):
+        await _earn(store, ACTIVE, 1_000_000)
+        ctx = _ctx(store)
+        await reminders.daily_summary_job(ctx)
+        assert "چیزی امروز جا مانده؟" in ctx.bot.sent[0]["text"]
 
     async def test_html_mode_is_used(self, store):
         await _earn(store, ACTIVE, 1_000_000)
@@ -212,6 +218,48 @@ class TestJob:
 
     def test_old_name_still_points_at_the_job(self):
         assert reminders.send_nightly_summary is reminders.daily_summary_job
+
+
+class TestDailyCloseEventsAndPreference:
+    async def test_sending_logs_a_daily_close_sent_event(self, store):
+        from hesabyar.db.models import RetentionEventKind
+        await _earn(store, ACTIVE, 1_000_000)
+        ctx = _ctx(store)
+        await reminders.daily_summary_job(ctx)
+        events = store.list(
+            "retention_events",
+            lambda e: e.user_id == ACTIVE and e.kind == RetentionEventKind.DAILY_CLOSE_SENT,
+        )
+        assert len(events) == 1
+
+    async def test_a_quiet_user_gets_no_event(self, store):
+        from hesabyar.db.models import RetentionEventKind
+        await tx.get_or_create_user(store, QUIET)
+        ctx = _ctx(store)
+        await reminders.daily_summary_job(ctx)
+        assert store.list(
+            "retention_events", lambda e: e.kind == RetentionEventKind.DAILY_CLOSE_SENT
+        ) == []
+
+    async def test_user_with_the_preference_off_gets_no_message_or_event(self, store):
+        from hesabyar.db.models import RetentionEventKind
+        await _earn(store, ACTIVE, 1_000_000)
+        user = store.get("users", ACTIVE)
+        user.notify_daily_close = False
+        await store.update("users", user)
+
+        ctx = _ctx(store)
+        await reminders.daily_summary_job(ctx)
+        assert ctx.bot.sent == []
+        assert store.list(
+            "retention_events", lambda e: e.kind == RetentionEventKind.DAILY_CLOSE_SENT
+        ) == []
+
+    async def test_default_preference_is_on_for_a_fresh_user(self, store):
+        await _earn(store, ACTIVE, 1_000_000)
+        ctx = _ctx(store)
+        await reminders.daily_summary_job(ctx)
+        assert ctx.bot.sent, "با ترجیحِ پیش‌فرض باید پیام برود"
 
 
 # --- دکمه‌ی «گزارش کامل» ---------------------------------------------------------
