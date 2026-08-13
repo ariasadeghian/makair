@@ -179,15 +179,75 @@ def _widen_columns(ws, indexes: Sequence[int]) -> None:
     ws.spreadsheet.batch_update({"requests": requests})
 
 
+class SchemaMismatchError(RuntimeError):
+    """هدرِ یک تبِ موجود نه با COLUMNSِ فعلیِ مدلش برابر است و نه پیشوندِ آن.
+
+    یعنی یک تغییرِ ناسازگار (جابه‌جایی/حذفِ ستون) رخ داده که نمی‌شود خودکار و
+    امن حلش کرد — به‌جای خرابکردنِ بی‌سروصدای داده، بلند خطا می‌دهیم.
+    """
+
+    def __init__(self, table: str, current_header: list, expected_header: list):
+        self.table = table
+        self.current_header = list(current_header)
+        self.expected_header = list(expected_header)
+        super().__init__(
+            f"هدرِ تبِ «{table}» با مدلِ فعلی ناسازگار است — نه برابر است، نه "
+            f"پیشوندش. مهاجرتِ خودکار انجام نشد.\n"
+            f"روی شیت: {list(current_header)}\n"
+            f"انتظارِ کد (باید پیشوندش باشد): {list(expected_header)}"
+        )
+
+
+def _reconcile_header(ws, expected_header: list) -> None:
+    """هدرِ یک تبِ موجود را با ``expected_header`` هماهنگ می‌کند.
+
+    فقط سه حالت را می‌پذیرد: تبِ کاملاً خالی (هدر نوشته می‌شود)، هدرِ از قبل
+    برابر (کاری نمی‌کند)، یا هدرِ فعلی که *پیشوندِ* هدرِ جدید است (فقط
+    ستون‌های اضافه‌شده در انتها نوشته می‌شوند — نه داده‌ای پاک/جابه‌جا
+    می‌شود، نه ستونِ قدیمی‌ای دست می‌خورد). هر حالتِ دیگر
+    :class:`SchemaMismatchError` می‌دهد.
+    """
+    current = ws.row_values(1)
+    if not current:
+        ws.append_row(expected_header)
+        return
+    if current == expected_header:
+        return
+    is_safe_prefix = (
+        len(current) < len(expected_header)
+        and expected_header[: len(current)] == current
+    )
+    if not is_safe_prefix:
+        raise SchemaMismatchError(ws.title, current, expected_header)
+
+    missing = expected_header[len(current):]
+    if ws.col_count < len(expected_header):
+        ws.resize(cols=len(expected_header))
+    start = _col_letter(len(current) + 1)
+    end = _col_letter(len(expected_header))
+    ws.update([missing], range_name=f"{start}1:{end}1", value_input_option="RAW")
+    logger.info(
+        "هدرِ تبِ «%s» با ستون‌های تازه هماهنگ شد: %s", ws.title, missing
+    )
+
+
 @with_retry
 def ensure_worksheets(spreadsheet, models: Optional[Sequence] = None) -> None:
-    """به‌صورت idempotent تب‌های خواسته‌شده را (با سطر هدر) می‌سازد.
+    """به‌صورت idempotent تب‌های خواسته‌شده را می‌سازد و هدرشان را با
+    COLUMNSِ فعلیِ مدل هماهنگ می‌کند.
 
     ``models`` را می‌دهیم تا اسپردشیت مرکزی فقط تب‌های رجیستری و اسپردشیت هر
     کاربر فقط تب‌های دفترِ خودش را داشته باشد. پیش‌فرض: همه‌ی مدل‌ها.
+
+    این تابع دقیقاً همان چیزی است که یک اسپردشیتِ نسخه‌ی قبلی را برای کدِ
+    نسخه‌ی جدید امن می‌کند: تبِ غایب (مثلاً ``retention_events`` که در نسخه‌ی
+    قبلی اصلاً وجود نداشت) ساخته می‌شود، و تبِ موجودی که هدرِ کهنه دارد
+    (ستون‌های تازه‌ای مثل ``snooze_until`` کم دارد) فقط همان ستون‌های کم را
+    می‌گیرد — بدون دست‌زدن به ردیف‌ها یا ستون‌های قدیمی. صداکردنِ چندباره‌اش
+    بی‌خطر است (idempotent).
     """
+    existing = {ws.title: ws for ws in spreadsheet.worksheets()}
     for model in (models if models is not None else ALL_MODELS):
-        existing = {ws.title: ws for ws in spreadsheet.worksheets()}
         header = list(model.COLUMNS)
         if model.TABLE not in existing:
             ws = spreadsheet.add_worksheet(
@@ -197,8 +257,9 @@ def ensure_worksheets(spreadsheet, models: Optional[Sequence] = None) -> None:
             # فقط همین‌جا — تبِ موجود دوباره استایل نمی‌خورد تا هر بار
             # بالا آمدنِ بات چند ده فراخوانیِ اضافه به API نزند.
             style_worksheet(ws, header)
-        elif not existing[model.TABLE].get_all_values():
-            existing[model.TABLE].append_row(header)
+            existing[model.TABLE] = ws
+        else:
+            _reconcile_header(existing[model.TABLE], header)
 
 
 # --- تبِ «خلاصه» و رنگِ دسته‌ها ---------------------------------------------------

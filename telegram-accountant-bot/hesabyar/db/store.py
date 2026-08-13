@@ -122,6 +122,12 @@ class Store:
             spreadsheet = await self._open_user_spreadsheet(user_id)
             if spreadsheet is None:
                 return False
+            # قبل از خواندن: تبِ غایب (مثلاً بعد از یک دیپلویِ تازه) ساخته و
+            # هدرِ تبِ موجود با COLUMNSِ فعلی هماهنگ می‌شود — کاربرِ قدیمی
+            # نباید نه WorksheetNotFound بگیرد نه با هدرِ کهنه غلط خوانده
+            # شود. اتکا به «فلاشِ اول درستش می‌کند» کافی نیست چون فلاش بعد
+            # از خواندنِ موفق می‌آید.
+            await asyncio.to_thread(sheets.ensure_worksheets, spreadsheet, USER_MODELS)
             ws_map = {}
             for model in USER_MODELS:
                 table = model.TABLE

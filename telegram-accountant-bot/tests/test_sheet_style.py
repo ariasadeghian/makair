@@ -264,3 +264,139 @@ class TestOnlyOnCreation:
         ).index("amount") + 1
         letter = sc._col_letter(amount_index)
         assert f"{letter}2:{letter}" in _ranges(ws)
+
+
+# --- هماهنگ‌سازیِ هدرِ تبِ موجود (فاز ۱۹ — سازگاریِ نصبِ قدیمی) --------------------
+
+
+class _FakeModel:
+    """مدلِ ساختگی با COLUMNS دلخواه — بدون درگیرشدن با مدل‌های واقعی."""
+
+    def __init__(self, table, columns):
+        self.TABLE = table
+        self.COLUMNS = tuple(columns)
+
+
+class TestReconcileHeaderAppendsSafely:
+    def test_missing_worksheet_is_created_with_full_header(self):
+        sheet = FakeSpreadsheet()
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+        sc.ensure_worksheets(sheet, models=[model])
+        ws = sheet.worksheet("widgets")
+        assert ws.row_values(1) == ["id", "name", "extra"]
+
+    def test_an_old_prefix_header_gets_the_missing_columns_appended(self):
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id", "name"])
+        ws.append_row(["1", "رضا"])
+        model = _FakeModel("widgets", ["id", "name", "extra1", "extra2"])
+
+        sc.ensure_worksheets(sheet, models=[model])
+
+        assert ws.row_values(1) == ["id", "name", "extra1", "extra2"]
+        # ردیفِ داده دست‌نخورده مانده (کوتاه‌تر از هدرِ تازه، که طبیعی است).
+        assert ws.get_all_values()[1][:2] == ["1", "رضا"]
+
+    def test_old_data_rows_read_back_with_empty_values_for_new_columns(self):
+        """پیامدِ عملی: ردیفِ قدیمی بعدِ خواندن، مقدارِ ستونِ تازه را خالی می‌بیند."""
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id", "name"])
+        ws.append_row(["1", "رضا"])
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+        sc.ensure_worksheets(sheet, models=[model])
+
+        records = sc.read_all_records(ws)
+        assert records == [{"id": "1", "name": "رضا", "extra": ""}]
+
+    def test_an_already_current_header_is_left_alone(self):
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id", "name"])
+        ws.append_row(["1", "رضا"])
+        model = _FakeModel("widgets", ["id", "name"])
+
+        sc.ensure_worksheets(sheet, models=[model])
+
+        assert ws.get_all_values() == [["id", "name"], ["1", "رضا"]]
+
+    def test_an_empty_existing_worksheet_just_gets_the_header(self):
+        sheet = FakeSpreadsheet()
+        sheet.add_worksheet("widgets")  # تب هست ولی هیچ ردیفی ندارد
+        model = _FakeModel("widgets", ["id", "name"])
+
+        sc.ensure_worksheets(sheet, models=[model])
+
+        assert sheet.worksheet("widgets").get_all_values() == [["id", "name"]]
+
+    def test_calling_it_twice_is_idempotent(self):
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id"])
+        ws.append_row(["1"])
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+
+        sc.ensure_worksheets(sheet, models=[model])
+        after_first = ws.get_all_values()
+        sc.ensure_worksheets(sheet, models=[model])
+        after_second = ws.get_all_values()
+
+        assert after_first == after_second == [["id", "name", "extra"], ["1"]]
+
+    def test_grid_is_resized_when_the_new_header_needs_more_columns(self):
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets", rows=200, cols=1)
+        ws.append_row(["id"])
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+
+        sc.ensure_worksheets(sheet, models=[model])
+
+        assert ws.col_count >= 3
+
+
+class TestReconcileHeaderFailsLoudlyOnMismatch:
+    def test_a_non_prefix_header_raises_schema_mismatch(self):
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id", "renamed_column"])
+        ws.append_row(["1", "x"])
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+
+        with pytest.raises(sc.SchemaMismatchError) as exc_info:
+            sc.ensure_worksheets(sheet, models=[model])
+        err = exc_info.value
+        assert err.table == "widgets"
+        assert err.current_header == ["id", "renamed_column"]
+        assert err.expected_header == ["id", "name", "extra"]
+
+    def test_a_header_longer_than_expected_also_raises(self):
+        """ستونی که از کدِ فعلی حذف شده هم باید بلند خطا بدهد، نه بی‌سروصدا رد شود."""
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id", "name", "extra", "even_more"])
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+
+        with pytest.raises(sc.SchemaMismatchError):
+            sc.ensure_worksheets(sheet, models=[model])
+
+    def test_the_mismatched_data_is_not_touched(self):
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id", "renamed_column"])
+        ws.append_row(["1", "x"])
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+
+        with pytest.raises(sc.SchemaMismatchError):
+            sc.ensure_worksheets(sheet, models=[model])
+
+        assert ws.get_all_values() == [["id", "renamed_column"], ["1", "x"]]
+
+    def test_error_message_names_the_worksheet(self):
+        sheet = FakeSpreadsheet()
+        ws = sheet.add_worksheet("widgets")
+        ws.append_row(["id", "renamed_column"])
+        model = _FakeModel("widgets", ["id", "name", "extra"])
+
+        with pytest.raises(sc.SchemaMismatchError, match="widgets"):
+            sc.ensure_worksheets(sheet, models=[model])
