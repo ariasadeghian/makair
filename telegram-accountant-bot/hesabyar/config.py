@@ -88,6 +88,12 @@ class Settings:
     stt_api_key: str | None = None
     stt_model: str = "whisper-1"
     stt_language: str = "fa"
+    # provider: "remote" (پیش‌فرض، درگاهِ سازگار با OpenAI بالا) یا "local"
+    # (کاملاً آفلاین با faster-whisper، بدون نیاز به STT_BASE_URL/STT_API_KEY)
+    stt_provider: str = "remote"
+    stt_local_model_size: str = "small"
+    stt_local_device: str = "cpu"
+    stt_local_compute_type: str = "int8"
     admin_ids: tuple[int, ...] = field(default_factory=tuple)
     # کانالی که نرخ روزانه‌ی دلار را می‌گذارد. بات باید ادمینِ آن باشد تا
     # پست‌ها را ببیند. خالی = فقط ثبت دستی با /rate.
@@ -200,6 +206,10 @@ def load_settings(require_token: bool = True) -> Settings:
         stt_api_key=_get("STT_API_KEY"),
         stt_model=_get("STT_MODEL", "whisper-1"),
         stt_language=_get("STT_LANGUAGE", "fa"),
+        stt_provider=_get("STT_PROVIDER", "remote") or "remote",
+        stt_local_model_size=_get("STT_LOCAL_MODEL_SIZE", "small") or "small",
+        stt_local_device=_get("STT_LOCAL_DEVICE", "cpu") or "cpu",
+        stt_local_compute_type=_get("STT_LOCAL_COMPUTE_TYPE", "int8") or "int8",
         admin_ids=admin_ids,
         rate_channel_id=_get_int("RATE_CHANNEL_ID", 0) or None,
         bot_username=(_get("BOT_USERNAME", "") or "").lstrip("@"),

@@ -14,3 +14,5 @@ openpyxl>=3.1
 matplotlib>=3.7
 pymupdf>=1.24
 tzdata>=2024.1
+# اختیاری — فقط لازم برای STT_PROVIDER=local (تبدیل گفتار به متنِ محلی/آفلاین)
+faster-whisper>=1.0

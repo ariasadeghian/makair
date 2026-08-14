@@ -194,10 +194,15 @@ OCR_MODEL=gpt-4o-mini
 نشان می‌دهد و بعد دقیقاً مثل یک پیام متنی ثبت/مسیریابی می‌کند (چه ثبت تراکنش،
 چه داخل یک فلو مثل صدور فاکتور).
 
+دو روش برای تبدیل گفتار به متن هست — **ریموت** (پیش‌فرض) یا کاملاً **محلی/آفلاین**:
+
+### روش ۱: ریموت (`STT_PROVIDER=remote`، پیش‌فرض)
+
 سرویس باید یک درگاهِ **سازگار با API نوع OpenAI** (`audio/transcriptions`، مثل
 Whisper) باشد که برای فارسی خوب کار می‌کند:
 
 ```
+STT_PROVIDER=remote
 STT_BASE_URL=https://your-proxy.example.com/v1
 STT_API_KEY=...
 STT_MODEL=whisper-1
@@ -208,6 +213,28 @@ STT_LANGUAGE=fa
 > کار مناسب نیستند، چون تلگرام ارتباط **بات‌به‌بات** را نمی‌دهد؛ به یک **API**
 > نیاز است. اگر `STT_*` را خالی بگذارید ولی `OCR_*` تنظیم باشد، از همان
 > اعتبارنامه استفاده می‌شود.
+
+### روش ۲: محلی/آفلاین (`STT_PROVIDER=local`)
+
+هیچ کلید API یا تماسِ خارجی لازم نیست؛ رونویسی با
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) روی خودِ سرور
+انجام می‌شود (کندتر از یک API ابری، ولی رایگان و کاملاً خصوصی):
+
+```
+STT_PROVIDER=local
+STT_LOCAL_MODEL_SIZE=small
+STT_LOCAL_DEVICE=cpu
+STT_LOCAL_COMPUTE_TYPE=int8
+```
+
+- پکیج `faster-whisper` باید نصب باشد (`pip install faster-whisper`؛ در
+  `requirements.txt` به‌صورت اختیاری آمده).
+- روی سیستمِ سرور به `ffmpeg` نیاز است (`apt-get install -y ffmpeg`) تا فایلِ
+  صوتیِ ogg/opusِ تلگرام خوانده شود.
+- مدل در اولین ویس بارگذاری می‌شود (چند ثانیه طول می‌کشد) و بعد از آن در
+  حافظه می‌ماند؛ نیازی به دانلود/تنظیمِ دستیِ مدل نیست.
+- `STT_LOCAL_MODEL_SIZE` می‌تواند `tiny`, `base`, `small`, `medium`, … باشد؛
+  `small` روی CPU برای فارسی تعادلِ خوبی بینِ سرعت و دقت دارد.
 
 ---
 
