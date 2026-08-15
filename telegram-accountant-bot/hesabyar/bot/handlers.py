@@ -56,6 +56,7 @@ from ..services import products as products_service
 from ..services import rates as rates_service
 from ..services import retention as retention_service
 from ..services import stt as stt_service
+from ..services import stt_correct as stt_correct_service
 from ..services import reports as report_service
 from ..services import subscription as sub_service
 from ..services import transactions as tx_service
@@ -2698,6 +2699,11 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (text or "").strip()
     if not text:
         return await msg.reply_text(texts.VOICE_EMPTY)
+
+    # اصلاحِ خطاهای شنیداریِ احتمالیِ STT با LLM (اختیاری)؛ هر خطایی یعنی
+    # همان متنِ خام بدون تغییر — این مرحله هرگز نباید روندِ ثبت را متوقف کند.
+    settings = context.application.bot_data["settings"]
+    text = await stt_correct_service.correct_transcript(settings, text)
 
     # آنچه شنیده شد را نشان بده تا کاربر مطمئن شود درست فهمیده‌ایم.
     await msg.reply_text(texts.VOICE_HEARD.format(text=text))
