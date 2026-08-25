@@ -1,0 +1,24 @@
+[Unit]
+Description=Hesabyar Telegram Accounting Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# مسیرها و کاربر را مطابق سرور خود تنظیم کنید
+User=hesabyar
+WorkingDirectory=/opt/hesabyar/telegram-accountant-bot
+EnvironmentFile=/opt/hesabyar/telegram-accountant-bot/.env
+ExecStart=/opt/hesabyar/telegram-accountant-bot/.venv/bin/python -m hesabyar
+Restart=always
+RestartSec=5
+# SIGTERM → بات صف نوشتن را روی گوگل‌شیت flush می‌کند؛ فرصت کافی بده.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# سخت‌سازی سبک
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

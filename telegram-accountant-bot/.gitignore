@@ -1,0 +1,23 @@
+# محیط و اسرار
+.env
+*.env
+!.env.example
+
+# دیتابیس محلی
+*.db
+*.sqlite
+*.sqlite3
+
+# فایل‌های تولیدشده (فاکتورهای PDF) و پشتیبان‌ها
+/generated/
+/data/
+backups/
+*.bak
+
+# پایتون
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
