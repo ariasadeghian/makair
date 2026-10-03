@@ -1,3 +1,5 @@
+> 🧊 **FROZEN (2026-10-03)** — این پروژه فریز شده است. جزئیات در [FROZEN.md](FROZEN.md).
+
 MakAir — Covid-19 Ventilator
 =====
 
